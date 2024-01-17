@@ -31,3 +31,5 @@ int NtNewFrameBuffer(NtPixel** frameBuffer, int width, int height);
 int NtNewDisplay(NtDisplay** display, int xRes, int yRes);
 int NtFreeDisplay(NtDisplay* display);
 int NtInitDisplay(NtDisplay* display);
+int Render(int width, int height, const char* input, const char* output);
+int ClipInt(int input);

@@ -3,8 +3,8 @@
 
 int main()
 {
-	NtDisplay* displayPtr;
-	NtNewDisplay(&displayPtr, 520, 520);
+	int status = Render(512, 512, "rects", "output1.ppm");
+	std::cout << "\nRender Status: " << status ? "Failed" : "Success";
 }
 
 /// <summary>
@@ -76,6 +76,7 @@ int NtInitDisplay(NtDisplay* display)
 		display->frameBuffer[i].g = 0;
 		display->frameBuffer[i].b = 0;
 		display->frameBuffer[i].a = 255;
+		display->frameBuffer[i].z = 0;
 	}
 
 	return NT_SUCCESS;
@@ -96,7 +97,7 @@ int NtInitDisplay(NtDisplay* display)
 int NtPutDisplay(NtDisplay* display, int i, int j, short r, short g, short b, short a, short z)
 {
 	if (display == nullptr || display->frameBuffer == nullptr) return NT_FAILURE;
-	int index = i + j * display->xRes;
+	int index = ClipInt(i) + ClipInt(j) * display->xRes;
 	display->frameBuffer[index].r = r;
 	display->frameBuffer[index].g = g;
 	display->frameBuffer[index].b = b;
@@ -106,6 +107,16 @@ int NtPutDisplay(NtDisplay* display, int i, int j, short r, short g, short b, sh
 	return NT_SUCCESS;
 }
 
+/// <summary>
+/// Placeholder clip function as negative rect position isn't supported yet
+/// </summary>
+/// <param name="input"></param>
+/// <returns></returns>
+int ClipInt(int input) {
+	if (input < 0) return 0;
+	if (input > 511) return 511;
+	return input;
+}
 /// <summary>
 /// Flushes display buffer to a ppm file
 /// </summary>
@@ -119,7 +130,7 @@ int NtFlushDisplayBufferPPM(FILE* outfile, NtDisplay* display)
 	if (display == nullptr || display->frameBuffer == nullptr) return NT_FAILURE;
 
 	// Write the PPM header
-	fprintf(outfile, "P3\n%d %d\n%d\n", display->xRes, display->yRes, 255);
+	fprintf(outfile, "P3\n%d %d\n%d\n", display->xRes, display->yRes, 5333);
 
 	for (int y = 0; y < display->yRes; y++) {
 		for (int x = 0; x < display->xRes; x++) {
@@ -138,11 +149,11 @@ int NtFlushDisplayBufferPPM(FILE* outfile, NtDisplay* display)
 /// Creates a render given input rect file
 /// </summary>
 /// <returns></returns>
-int Render(int width, int height, char* input, char* output)
+int Render(int width, int height, const char* input, const char* output)
 {
 	int		i, j;
-	int		xRes, yRes,
-		int		status;
+	int		xRes, yRes;
+	int		status;
 
 	status = 0;
 
@@ -156,23 +167,24 @@ int Render(int width, int height, char* input, char* output)
 	if (status) exit(NT_FAILURE);
 
 	// I/O File open
-	FILE* infile;
-	if ((infile = fopen(input, "r")) == NULL)
+	FILE* infile = NULL;
+	errno_t errInfile = fopen_s(&infile, input, "r");
+	if (errInfile != 0 || infile == NULL)
 	{
-		std::cout << "Failed to open input file\n";
+		std::cout << "Failed to open input file\n" << "Error code : " << errInfile << "\n";
 		return NT_FAILURE;
 	}
 
-	FILE* outfile;
-	if ((outfile = fopen(output, "wb")) == NULL)
-	{
-		std::cout << "Failed to open output file\n";
+	FILE* outfile = NULL;
+	errno_t errOutfile = fopen_s(&outfile, output, "wb");
+	if (errOutfile != 0 || outfile == NULL) {
+		std::cout << "Failed to open output file: " << output << "\n";
 		return NT_FAILURE;
 	}
 
-	//Parsing input
-	int	ulx, uly, lrx, lry, r, g, b;
-	while (fscanf(infile, "%d %d %d %d %d %d %d",
+	// Parsing input
+	int ulx, uly, lrx, lry, r, g, b;
+	while (fscanf_s(infile, "%d %d %d %d %d %d %d",
 		&ulx, &uly, &lrx, &lry, &r, &g, &b) == 7) {
 		for (j = uly; j <= lry; j++) {
 			for (i = ulx; i <= lrx; i++) {
@@ -180,6 +192,7 @@ int Render(int width, int height, char* input, char* output)
 			}
 		}
 	}
+
 
 	NtFlushDisplayBufferPPM(outfile, displayPtr); 	/* write out or update display to file*/
 
