@@ -102,4 +102,36 @@ int NtPutDisplay(NtDisplay* display, int i, int j, short r, short g, short b, sh
 	display->frameBuffer[index].b = b;
 	display->frameBuffer[index].a = a;
 	display->frameBuffer[index].z = z;
+
+	return NT_SUCCESS;
 }
+
+/// <summary>
+/// Flushes display buffer to a ppm file
+/// </summary>
+/// <param name="outfile"></param>
+/// <param name="display"></param>
+/// <returns></returns>
+int NtFlushDisplayBufferPPM(FILE* outfile, NtDisplay* display)
+{
+
+	/* write pixels to ppm file based on display class -- "P6 %d %d 255\r" */
+	if (display == nullptr || display->frameBuffer == nullptr) return NT_FAILURE;
+
+	// Write the PPM header
+	fprintf(outfile, "P3\n%d %d\n%d\n", display->xRes, display->yRes, 255);
+
+	for (int y = 0; y < display->yRes; y++) {
+		for (int x = 0; x < display->xRes; x++) {
+			// Accessing the pixel at (x, y)
+			NtPixel pixel = display->frameBuffer[y * display->xRes + x];
+
+			// Write the RGB values to the file
+			fprintf(outfile, "%d %d %d ", pixel.r, pixel.g, pixel.b);
+		}
+		fprintf(outfile, "\n"); // Newline after each row of pixels
+	}
+	return NT_SUCCESS;
+}
+
+
