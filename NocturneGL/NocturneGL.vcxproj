@@ -127,6 +127,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="Application1.cpp" />
     <ClCompile Include="NocturneGL.cpp" />
   </ItemGroup>
   <ItemGroup>
