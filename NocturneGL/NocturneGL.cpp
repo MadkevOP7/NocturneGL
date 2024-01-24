@@ -1,6 +1,27 @@
 #include <iostream>
 #include "NocturneGL.h"
+#include <cmath>
+#include <limits>
+class NTMath {
+public:
+	//Barycentric Coordinates
+	static float f01(float x, float y, Vector3 v0, Vector3 v1) {
+		return (v0.y - v1.y) * x + (v1.x - v0.x) * y + v0.x * v1.y - v1.x * v0.y;
+	}
 
+	static float f12(float x, float y, Vector3 v1, Vector3 v2) {
+		return (v1.y - v2.y) * x + (v2.x - v1.x) * y + v1.x * v2.y - v2.x * v1.y;
+	}
+
+	static float f20(float x, float y, Vector3 v2, Vector3 v0) {
+		return (v2.y - v0.y) * x + (v0.x - v2.x) * y + v2.x * v0.y - v0.x * v2.y;
+	}
+
+	static short fts(float color)		/* convert float color to short */
+	{
+		return(short)((int)(color * ((1 << 12) - 1)));
+	}
+};
 /// <summary>
 /// Creates a frame buffer and allocates memory of size NtPixel x width x height and passes back pointer
 /// </summary>
@@ -70,7 +91,6 @@ int NtInitDisplay(NtDisplay* display)
 		display->frameBuffer[i].g = 0;
 		display->frameBuffer[i].b = 0;
 		display->frameBuffer[i].a = 255;
-		display->frameBuffer[i].z = 0;
 	}
 
 	return NT_SUCCESS;
@@ -88,16 +108,14 @@ int NtInitDisplay(NtDisplay* display)
 /// <param name="a"></param>
 /// <param name="z"></param>
 /// <returns></returns>
-int NtPutDisplay(NtDisplay* display, int i, int j, short r, short g, short b, short a, short z)
+int NtPutDisplay(NtDisplay* display, int i, int j, short r, short g, short b, short a)
 {
 	if (display == nullptr || display->frameBuffer == nullptr) return NT_FAILURE;
-	int index = ClipInt(i) + ClipInt(j) * display->xRes;
+	int index = ClipInt(i, 0, display->xRes) + ClipInt(j, 0, display->yRes) * display->xRes;
 	display->frameBuffer[index].r = r;
 	display->frameBuffer[index].g = g;
 	display->frameBuffer[index].b = b;
 	display->frameBuffer[index].a = a;
-	display->frameBuffer[index].z = z;
-
 	return NT_SUCCESS;
 }
 
@@ -106,9 +124,15 @@ int NtPutDisplay(NtDisplay* display, int i, int j, short r, short g, short b, sh
 /// </summary>
 /// <param name="input"></param>
 /// <returns></returns>
-int ClipInt(int input) {
-	if (input < 0) return 0;
-	if (input > 511) return 511;
+int ClipInt(int input, int min, int max) {
+	if (input < min) return min;
+	if (input > max) return max;
+	return input;
+}
+
+float Clipf(float input, int min, int max) {
+	if (input < min) return min;
+	if (input > max) return max;
 	return input;
 }
 /// <summary>
@@ -141,14 +165,105 @@ int NtFlushDisplayBufferPPM(FILE* outfile, NtDisplay* display)
 
 /*Renderer*/
 
+/// <summary>
+/// Creates a new render, display must be already initialized here.
+/// We grab params from display (ie. xRes, yRes)
+/// </summary>
+/// <param name="render"></param>
+/// <param name="display"></param>
+/// <returns></returns>
 int NtNewRender(NtRender** render, NtDisplay* display) {
+	if (display == nullptr) return NT_FAILURE;
 	*render = new NtRender();
 	(*render)->display = display;
+	(*render)->zBuffer = new float* [display->xRes];
+	if (!(*render)->zBuffer) {
+		delete render;
+		return NT_FAILURE;
+	}
+
+	for (int i = 0; i < display->xRes; i++) {
+		(*render)->zBuffer[i] = new float[display->yRes];
+
+		// Initialize Z-buffer to infinity
+		for (int j = 0; j < display->yRes; j++) {
+			(*render)->zBuffer[i][j] = INFINITY;
+		}
+	}
+
 	return NT_SUCCESS;
 }
 
-int NtFreeRender(NtRender* render);
-int NtBeginRender(NtRender* render);
+/// <summary>
+/// Deallocates memory
+/// </summary>
+/// <param name="render"></param>
+/// <returns></returns>
+int NtFreeRender(NtRender* render) {
+	//Free zbuffer
+	for (int i = 0; i < render->display->xRes; i++) {
+		delete[] render->zBuffer[i];
+	}
+	delete[] render->zBuffer;
+	delete render;
+	return NT_SUCCESS;
+}
 
-int NtPutTriangle(NtRender* render, Vertex3f* vertices, Vertex3f* normals);
+/// <summary>
+/// Process a single triangle with z-buffer
+/// </summary>
+/// <param name="render"></param>
+/// <param name="vertexList"></param>
+/// <param name="normalList"></param>
+/// <param name="color"></param>
+/// <returns></returns>
+int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], Vector3 color) {
+	if (render == nullptr) return NT_FAILURE;
+
+	//Clip x,y,z to display bounds
+	float xRes = render->display->xRes;
+	float yRes = render->display->yRes;
+
+	for (int i = 0; i < 3; i++) {
+		vertexList[i].x = Clipf(vertexList[i].x, 0, xRes);
+		vertexList[i].y = Clipf(vertexList[i].y, 0, yRes);
+	}
+
+	//Calculate bounding box
+	float xMinf = vertexList[0].x, xMaxf = vertexList[0].x, yMinf = vertexList[0].y, yMaxf = vertexList[0].y;
+	for (int i = 0; i < 3; i++) {
+		float currX = vertexList[i].x;
+		float currY = vertexList[i].y;
+		xMinf = std::fminf(xMinf, currX);
+		xMaxf = std::fmaxf(xMaxf, currX);
+		yMinf = std::fminf(yMinf, currY);
+		yMaxf = std::fmaxf(yMaxf, currY);
+	}
+	int xMin = std::floor(xMinf);
+	int yMin = std::floor(yMinf);
+	int xMax = std::ceil(xMaxf);
+	int yMax = std::ceil(yMaxf);
+	for (int y = yMin; y <= yMax; y++) {
+		for (int x = xMin; x <= xMax; x++) {
+			Vector3 v0 = vertexList[0];
+			Vector3 v1 = vertexList[1];
+			Vector3 v2 = vertexList[2];
+			float alpha = NTMath::f12(x, y, v1, v2) / NTMath::f12(v0.x, v0.y, v1, v2);
+			float beta = NTMath::f20(x, y, v2, v0) / NTMath::f20(v1.x, v1.y, v2, v0);
+			float gamma = NTMath::f01(x, y, v0, v1) / NTMath::f01(v2.x, v2.y, v0, v1);
+
+			if ((alpha >= 0) && (beta >= 0) && (gamma >= 0)) {
+				//Z-Buffer to determine if current pixel should be put
+				//Interpolate z from alpha beta gamma
+				float currZ = alpha * v0.z + beta * v1.z + gamma * v2.z;
+				if (currZ < render->zBuffer[x][y]) {
+					// Update the Z-buffer
+					render->zBuffer[x][y] = currZ;
+					NtPutDisplay(render->display, x, y, NTMath::fts(color.x), NTMath::fts(color.y), NTMath::fts(color.z), 255);
+				}
+			}
+		}
+	}
+}
+
 

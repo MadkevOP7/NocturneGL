@@ -129,6 +129,7 @@
   <ItemGroup>
     <ClCompile Include="Application1.cpp" />
     <ClCompile Include="NocturneGL.cpp" />
+    <ClCompile Include="Application2.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="NocturneGL.h" />

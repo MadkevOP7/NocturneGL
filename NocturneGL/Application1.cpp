@@ -4,7 +4,7 @@
 /// Creates a render given input rect file
 /// </summary>
 /// <returns></returns>
-int Render(int width, int height, const char* input, const char* output)
+int Render_1(int width, int height, const char* input, const char* output)
 {
 	int		i, j;
 	int		xRes, yRes;
@@ -43,7 +43,7 @@ int Render(int width, int height, const char* input, const char* output)
 		&ulx, &uly, &lrx, &lry, &r, &g, &b) == 7) {
 		for (j = uly; j <= lry; j++) {
 			for (i = ulx; i <= lrx; i++) {
-				NtPutDisplay(displayPtr, i, j, r, g, b, 1, 0);
+				NtPutDisplay(displayPtr, i, j, r, g, b, 1);
 			}
 		}
 	}
@@ -70,8 +70,8 @@ int Render(int width, int height, const char* input, const char* output)
 
 }
 
-int main()
-{
-	int status = Render(512, 512, "rects", "output1.ppm");
-	std::cout << "\nRender Status: " << (status == NT_SUCCESS ? "Success" : "Failed");
-}
+//int main()
+//{
+//	int status = Render_1(512, 512, "rects", "output1.ppm");
+//	std::cout << "\nRender Status: " << (status == NT_SUCCESS ? "Success" : "Failed");
+//}
