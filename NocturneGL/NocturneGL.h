@@ -1,6 +1,7 @@
 #pragma once
 #include<iostream>
 #include<vector>
+#include <unordered_map>
 /*Pixel Data*/
 typedef struct {
 	short r, g, b, a;
@@ -164,11 +165,32 @@ typedef struct NtMatrix {
 	}
 } NtMatrix;
 
+typedef struct NtVertex {
+	Vector3 vertexPos;
+	Vector3 vertexNormal;
+	Vector2 texture;
+}NtVertex;
+
+typedef struct NtTriangle {
+	NtVertex v0;
+	NtVertex v1;
+	NtVertex v2;
+} NtTriangle;
+
+typedef struct NtMesh {
+	std::vector<NtTriangle> triangles;
+};
+
 //Perspective & Camera
 typedef struct NtCamera
 {
 	NtMatrix        viewMatrix;		/* world to image space */
 	NtMatrix        projectMatrix;  /* perspective projection */
+	Vector3 from;
+	Vector3 to;
+	float near, far, right, left, top, bottom;
+	int xRes;
+	int yRes;
 } NzCamera;
 
 /*Core Functions*/
@@ -187,7 +209,7 @@ typedef struct {
 	float** zBuffer;
 	NtCamera* camera;
 	std::vector<NtMatrix> matrixStack;
-	NtMatrix mvp; //Model view perspective
+	NtMatrix worldMatrix; //Object to world
 }  NtRender;
 
 
@@ -203,6 +225,8 @@ typedef struct  NtInput
 int NtNewRender(NtRender** render, NtDisplay* display);
 int NtFreeRender(NtRender* render);
 int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], Vector3 color);
+int NtPutTriangle(NtRender* render, NtTriangle& triangle);
+
 //////Perspective, Matrix//////
 void NtLoadIdentityMatrix(NtMatrix& mat);
 void NtPushMatrix(NtRender* render, const NtMatrix& matrix);
@@ -237,3 +261,37 @@ inline Vector4 Vector4::operator*(const NtMatrix& mat) {
 
 	return Vector4(x, y, z, w);
 }
+
+//Scene
+typedef struct NtTransformation {
+	Vector3 scale; //Each x, y, z is rotation around that axis in degrees
+	Vector3 rotation;
+	Vector3 translation;
+}NtTransformation;
+typedef struct NtMaterial {
+	Vector3 surfaceColor;
+	float ambient;
+	float diffuse;
+	float specular;
+	float normal;
+} NtMaterial;
+typedef struct NtShape
+{
+	std::string id;
+	std::string geometryId;
+	std::string notes;
+	NtMaterial material;
+	NtTransformation transforms;
+
+} NtShape;
+
+typedef struct  NtScene
+{
+	std::vector<NtShape> shapes;
+	NtCamera camera;
+	std::unordered_map<std::string, NtMesh*> meshMap;
+} NtScene;
+int NtLoadSceneJSON(std::string scenePath, NtScene* scene);
+int NtLoadMesh(std::string meshName, const std::string meshExtension, NtScene* scene);
+int NtSetWorldMatrix(NtRender* render, NtMatrix& matrix);
+int NtRenderScene(NtScene* scene, const std::string outputName);

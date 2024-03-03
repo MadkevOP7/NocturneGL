@@ -1,7 +1,9 @@
 #include <iostream>
+#include <fstream>
 #include "NocturneGL.h"
 #include <cmath>
 #include <limits>
+#include "json.hpp"
 class NTMath {
 public:
 	//Barycentric Coordinates
@@ -196,7 +198,7 @@ int NtNewRender(NtRender** render, NtDisplay* display) {
 			(*render)->zBuffer[i][j] = INFINITY;
 		}
 	}
-
+	NtLoadIdentityMatrix((*render)->worldMatrix);
 	return NT_SUCCESS;
 }
 
@@ -228,8 +230,9 @@ int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], 
 
 	for (int i = 0; i < 3; i++) {
 		Vector4 vec4(vertexList[i].x, vertexList[i].y, vertexList[i].z, 1);
-		Vector4 result = vec4 * render->camera->viewMatrix;
-		Vector4 ndcResult = result * render->camera->projectMatrix;
+		Vector4 worldResult = vec4 * render->worldMatrix;
+		Vector4 camResult = worldResult * render->camera->viewMatrix;
+		Vector4 ndcResult = camResult * render->camera->projectMatrix;
 		//Write result back to vector3 
 		vertexList[i].x = ndcResult.x / ndcResult.w;
 		vertexList[i].y = ndcResult.y / ndcResult.w;
@@ -287,6 +290,26 @@ int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], 
 	}
 }
 
+int NtPutTriangle(NtRender* render, NtTriangle& triangle) {
+	if (render == nullptr) return NT_FAILURE;
+	Vector3 vertexList[3];
+	vertexList[0] = triangle.v0.vertexPos;
+	vertexList[1] = triangle.v1.vertexPos;
+	vertexList[2] = triangle.v2.vertexPos;
+
+	Vector3 normalList[3];
+	normalList[0] = triangle.v0.vertexNormal;
+	normalList[1] = triangle.v1.vertexNormal;
+	normalList[2] = triangle.v2.vertexNormal;
+
+	//Todo: compute color
+	Vector3 color;
+	color.x = 0.81f;
+	color.y = 0.55f;
+	color.z = 0.75f;
+
+	return NtPutTriangle(render, vertexList, normalList, color);
+}
 //////Transormations//////
 
 /// <summary>
@@ -300,6 +323,17 @@ void NtLoadIdentityMatrix(NtMatrix& mat) {
 		}
 	}
 }
+
+/// <summary>
+/// Sets the render's world matrix
+/// </summary>
+/// <param name="matrix"></param>
+/// <returns></returns>
+int NtSetWorldMatrix(NtRender* render, NtMatrix& matrix) {
+	render->worldMatrix = matrix;
+	return NT_SUCCESS;
+}
+
 /// <summary>
 ///	Create rotate matrix : rotate along x axis.
 /// Pass back the matrix using mat value
@@ -332,7 +366,7 @@ int NtRotYMat(float degree, NtMatrix& mat)
 
 	mat[0][0] = cos(rad);
 	mat[0][2] = sin(rad);
-	mat[2][1] = -sin(rad);
+	mat[2][0] = -sin(rad);
 	mat[2][2] = cos(rad);
 	return NT_SUCCESS;
 }
@@ -389,8 +423,6 @@ int NtScaleMat(Vector3 scale, NtMatrix& mat)
 	mat[2][2] = scale.z;
 
 	return NT_SUCCESS;
-
-	return NT_SUCCESS;
 }
 
 /// <summary>
@@ -435,6 +467,7 @@ int NtPutCamera(NtRender* render, NtCamera& camera) {
 
 /// <summary>
 /// Calculates the view matrix based on current camera definition
+/// viewer's 'up' is v, view ('look') direction is n, cross(v,n) is u, and r is the translation (eg. "eye point", camera location).
 /// </summary>
 /// <param name="render"></param>
 /// <returns></returns>
@@ -466,5 +499,217 @@ int NtCalculateProjectionMatrix(NtCamera& camera, float near, float far, float t
 	proj[2][3] = -2 * far * near / (far - near);
 
 	camera.projectMatrix = proj;
+	return NT_SUCCESS;
+}
+
+
+///////Scene///////
+
+/// <summary>
+/// Loads a scene description in JSON format to current scene
+/// </summary>
+/// <param name="scenePath"></param>
+int NtLoadSceneJSON(std::string scenePath, NtScene* scene) {
+	using json = nlohmann::json;
+
+	std::ifstream file(scenePath); // Assuming the JSON is stored in a file named "scene.json"
+
+	if (!file.is_open()) {
+		std::cerr << "Failed to open JSON file\n";
+		return NT_FAILURE;
+	}
+
+	// Parse the JSON
+	json jsonData;
+	try {
+		file >> jsonData;
+	}
+	catch (const std::exception& e) {
+		std::cout << "Error parsing JSON" << "\n";
+		return NT_FAILURE;
+	}
+
+	try {
+		// Parse shapes
+		if (jsonData["scene"].find("shapes") != jsonData["scene"].end()) {
+			for (const auto& shapeValue : jsonData["scene"]["shapes"]) {
+				NtShape shape;
+				shape.id = shapeValue["id"];
+				shape.geometryId = shapeValue["geometry"];
+				shape.notes = shapeValue["notes"];
+
+				//Write material
+				const auto& material = shapeValue["material"];
+				shape.material.surfaceColor.x = material["Cs"][0];
+				shape.material.surfaceColor.y = material["Cs"][1];
+				shape.material.surfaceColor.z = material["Cs"][2];
+				shape.material.ambient = material["Ka"];
+				shape.material.diffuse = material["Kd"];
+				shape.material.specular = material["Ks"];
+				shape.material.normal = material["n"];
+
+				//Write transformations
+				const auto& transforms = shapeValue["transforms"];
+				shape.transforms.scale.x = transforms[1]["S"][0];
+				shape.transforms.scale.y = transforms[1]["S"][1];
+				shape.transforms.scale.z = transforms[1]["S"][2];
+
+				//Write rotations
+				if (transforms[0].find("Ry") != transforms[0].end()) {
+					shape.transforms.rotation.y = transforms[0]["Ry"];
+				}
+				if (transforms[0].find("Rx") != transforms[0].end()) {
+					shape.transforms.rotation.x = transforms[0]["Rx"];
+				}
+				if (transforms[0].find("Rz") != transforms[0].end()) {
+					shape.transforms.rotation.z = transforms[0]["Rz"];
+				}
+
+				shape.transforms.translation.x = transforms[2]["T"][0];
+				shape.transforms.translation.y = transforms[2]["T"][1];
+				shape.transforms.translation.z = transforms[2]["T"][2];
+
+				scene->shapes.push_back(shape);
+			}
+		}
+
+		// Parse camera
+		if (jsonData["scene"].find("camera") != jsonData["scene"].end()) {
+			const auto& cameraValue = jsonData["scene"]["camera"];
+			scene->camera.from.x = cameraValue["from"][0];
+			scene->camera.from.y = cameraValue["from"][1];
+			scene->camera.from.z = cameraValue["from"][2];
+			scene->camera.to.x = cameraValue["to"][0];
+			scene->camera.to.y = cameraValue["to"][1];
+			scene->camera.to.z = cameraValue["to"][2];
+			scene->camera.near = cameraValue["bounds"][0];
+			scene->camera.far = cameraValue["bounds"][1];
+			scene->camera.right = cameraValue["bounds"][2];
+			scene->camera.left = cameraValue["bounds"][3];
+			scene->camera.top = cameraValue["bounds"][4];
+			scene->camera.bottom = cameraValue["bounds"][5];
+
+			scene->camera.xRes = cameraValue["resolution"][0];
+			scene->camera.yRes = cameraValue["resolution"][1];
+		}
+		std::cout << "Scene parsing completed!";
+		return NT_SUCCESS;
+	}
+	catch (const std::exception& e) {
+		std::cout << "Error parsing JSON " << e.what() << "\n";
+		return NT_FAILURE;
+	}
+}
+
+int NtLoadMesh(const std::string meshName, const std::string meshExtension, NtScene* scene) {
+	std::ifstream file(meshName + meshExtension);
+	if (!file.is_open()) {
+		std::cout << "File with name " << meshName << meshExtension << " could not be found";
+		return NT_FAILURE;
+	}
+
+	nlohmann::json jsonData;
+	file >> jsonData;
+
+	NtMesh* mesh = new NtMesh();
+	for (const auto& item : jsonData["data"]) {
+		NtTriangle triangle;
+		// Parse vertices
+		for (int i = 0; i < 3; ++i) {
+			std::string vertexKey = "v" + std::to_string(i);
+			Vector3 pos = { item[vertexKey]["v"][0], item[vertexKey]["v"][1], item[vertexKey]["v"][2] };
+			Vector3 norm = { item[vertexKey]["n"][0], item[vertexKey]["n"][1], item[vertexKey]["n"][2] };
+			Vector2 tex = { item[vertexKey]["t"][0], item[vertexKey]["t"][1] };
+
+			NtVertex vertex;
+			vertex.vertexPos = pos;
+			vertex.vertexNormal = norm;
+			vertex.texture = tex;
+
+			switch (i) {
+			case 0: triangle.v0 = vertex; break;
+			case 1: triangle.v1 = vertex; break;
+			case 2: triangle.v2 = vertex; break;
+			}
+		}
+
+		mesh->triangles.push_back(triangle);
+	}
+
+	scene->meshMap[meshName] = mesh;
+	return NT_SUCCESS;
+}
+
+/// <summary>
+/// Renders a scene, handles the other stuff automatically
+/// </summary>
+/// <param name="scene"></param>
+/// <param name="outputName"></param>
+/// <returns></returns>
+int NtRenderScene(NtScene* scene, const std::string outputName) {
+	int status = 0;
+	NtDisplay* displayPtr;
+	status |= NtNewDisplay(&displayPtr, scene->camera.xRes, scene->camera.yRes);
+	NtRender* renderPtr;
+	status |= NtNewRender(&renderPtr, displayPtr);
+	if (status) exit(NT_FAILURE);
+
+
+	//Put camera and matrix
+	status |= NtPutCamera(renderPtr, scene->camera);
+
+	//Calculate camerae matrix, we need to calculate u, v, n, r
+	Vector3 n = (scene->camera.from - scene->camera.to);
+	n.normalize();
+
+	//Assume world up
+	Vector3 worldUp = { 0, 1, 0 };
+
+	Vector3 u = worldUp.cross(n);
+	u.normalize();
+
+	Vector3 v = n.cross(u);
+
+	Vector3 r = scene->camera.from;
+
+	status |= NtCalculateViewMatrix(scene->camera, u, v, n, r);
+	status |= NtCalculateProjectionMatrix(scene->camera, scene->camera.near, scene->camera.far, scene->camera.top, scene->camera.bottom, scene->camera.left, scene->camera.right);
+
+	//Render each shape, each time computing the new transformation (world matrix) and put triangle
+	for (auto& shape : scene->shapes) {
+		//Load transformation matrix
+		NtMatrix zRot;
+		NtRotZMat(shape.transforms.rotation.z, zRot);
+		NtMatrix yRot;
+		NtRotYMat(shape.transforms.rotation.y, yRot);
+		NtMatrix xRot;
+		NtRotXMat(shape.transforms.rotation.x, xRot);
+
+		NtMatrix combinedRotation = zRot * yRot * xRot;
+
+		NtMatrix scale;
+		NtScaleMat(shape.transforms.scale, scale);
+
+		NtMatrix translation;
+		NtTranslateMat(shape.transforms.translation, translation);
+
+		NtMatrix combinedTransformation = translation * combinedRotation * scale;
+
+		NtSetWorldMatrix(renderPtr, combinedTransformation);
+		//Render faces of that model
+		NtMesh* mesh = scene->meshMap[shape.geometryId];
+		for (NtTriangle& triangle : mesh->triangles) {
+			NtPutTriangle(renderPtr, triangle);
+		}
+	}
+
+	//Flush to ppm
+	FILE* outfile = NULL;
+	errno_t errOutfile = fopen_s(&outfile, outputName.c_str(), "wb");
+	if (errOutfile != 0 || outfile == NULL) {
+		std::cout << "Failed to open output file: " << outputName << "\n";
+		return NT_FAILURE;
+	}
+	NtFlushDisplayBufferPPM(outfile, displayPtr);
 	return NT_SUCCESS;
 }

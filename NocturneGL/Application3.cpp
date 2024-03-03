@@ -141,8 +141,9 @@ int Render_3(int width, int height, const char* input, const char* output)
 
 }
 
-int main()
+int main_3()
 {
 	int status = Render_3(256, 256, "app3Pot.asc", "output3.ppm");
 	std::cout << "\nRender Status: " << (status == NT_SUCCESS ? "Success" : "Failed");
+	return 0;
 }
