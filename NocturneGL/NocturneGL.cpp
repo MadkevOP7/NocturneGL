@@ -909,34 +909,3 @@ Vector3 NtLightingPhong(const NtMaterial& material, const Vector3& normal, const
 
 	return color;
 }
-
-Vector3 NtShadeFlat(const Vector3& normal, const NtRender& render, const NtMaterial& material) {
-	float dotp = render.directionalLight.direction.dot(normal);
-
-	dotp = Clipf(dotp, 0, 1);
-	dotp *= render.directionalLight.intensity;
-
-	//Calculate diffuse from directional
-	Vector3 diffuse;
-	diffuse.x = material.surfaceColor.x * render.directionalLight.color.x * dotp * render.directionalLight.intensity;
-	diffuse.y = material.surfaceColor.y * render.directionalLight.color.y * dotp * render.directionalLight.intensity;
-	diffuse.z = material.surfaceColor.z * render.directionalLight.color.z * dotp * render.directionalLight.intensity;
-
-	//Calculate the ambient light 
-	Vector3 ambient;
-	ambient.x = material.surfaceColor.x * render.ambientLight.color.x * render.ambientLight.intensity;
-	ambient.y = material.surfaceColor.y * render.ambientLight.color.y * render.ambientLight.intensity;
-	ambient.z = material.surfaceColor.z * render.ambientLight.color.z * render.ambientLight.intensity;
-
-	//Combine ambient with diffuse
-	Vector3 triColor;
-	triColor.x = diffuse.x + ambient.x;
-	triColor.y = diffuse.y + ambient.y;
-	triColor.z = diffuse.z + ambient.z;
-
-	// Ensure the final color components are within the range [0, 1]
-	triColor.x = Clipf(triColor.x, 0, 1);
-	triColor.y = Clipf(triColor.y, 0, 1);
-	triColor.z = Clipf(triColor.z, 0, 1);
-	return triColor;
-}
