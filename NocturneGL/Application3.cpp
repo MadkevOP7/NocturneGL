@@ -114,7 +114,7 @@ int Render_3(int width, int height, const char* input, const char* output)
 			&(uvList[2].v[0]), &(uvList[2].v[1]));
 		//Shade and put triangle
 		Vector3 col = ComputeTriColor_3(normalList[0]);
-		NtPutTriangle(renderPtr, vertexList, normalList, col);
+		//NtPutTriangle(renderPtr, vertexList, normalList, col);
 	}
 
 

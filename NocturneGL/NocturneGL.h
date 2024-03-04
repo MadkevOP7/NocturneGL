@@ -83,6 +83,11 @@ struct Vector3 {
 		return { x * scalar, y * scalar, z * scalar };
 	}
 
+	//Component wise multiplication
+	Vector3 operator*(const Vector3& other) const {
+		return { x * other.x, y * other.y, z * other.z };
+	}
+
 	// Vector subtraction
 	Vector3 operator-(const Vector3& other) const {
 		return { x - other.x, y - other.y, z - other.z };
@@ -118,6 +123,13 @@ struct Vector3 {
 
 	float dot(const Vector3& other) const {
 		return x * other.x + y * other.y + z * other.z;
+	}
+
+	static Vector3 reflect(const Vector3& I, const Vector3& N) {
+		float IDotN = I.dot(N);
+		IDotN *= 2;
+		Vector3 _N = N * IDotN;
+		return I - _N;
 	}
 };
 
@@ -231,6 +243,7 @@ typedef struct NtCamera
 {
 	NtMatrix        viewMatrix;		/* world to image space */
 	NtMatrix        projectMatrix;  /* perspective projection */
+	Vector3 viewDirection;
 	Vector3 from;
 	Vector3 to;
 	float near, far, right, left, top, bottom;
@@ -261,43 +274,6 @@ typedef struct  NtInput
 	NtCamera		camera;			/* camera */
 } NtInput;
 
-/*Core Functions*/
-int NtSetShadingMode(NtRender* render, NT_SHADING_MODE mode);
-int NtNewFrameBuffer(NtPixel** frameBuffer, int width, int height);
-int NtNewDisplay(NtDisplay** display, int xRes, int yRes, Vector4 backgroundColor = { 0, 0, 0, 255 });
-int NtFreeDisplay(NtDisplay* display);
-int NtInitDisplay(NtDisplay* display, const Vector4& backgroundColor); //Default black
-int NtFlushDisplayBufferPPM(FILE* outfile, NtDisplay* display);
-int NtPutDisplay(NtDisplay* display, int i, int j, short r, short g, short b, short a);
-int ClipInt(int input, int min, int max);
-float Clipf(float input, int min, int max);
-
-int NtNewRender(NtRender** render, NtDisplay* display);
-int NtFreeRender(NtRender* render);
-int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], const Vector3& baseColor);
-int NtPutTriangle(NtRender* render, NtTriangle& triangle, const Vector3& baseColor);
-
-//////Perspective, Matrix//////
-void NtLoadIdentityMatrix(NtMatrix& mat);
-void NtPushMatrix(NtRender* render, const NtMatrix& matrix);
-void NtPopMatrix(NtRender* render);
-int NtGetTopMatrix(NtRender* render, NtMatrix& mat);
-int NtRotXMat(float degree, NtMatrix& mat);
-int NtRotYMat(float degree, NtMatrix& mat);
-int NtRotZMat(float degree, NtMatrix& mat);
-
-int NtInvertRotMat(const NtMatrix& mat, NtMatrix& result);
-int NtInvertScaleMat(const NtMatrix& mat, NtMatrix& result);
-int NtInvertTranslateMat(const NtMatrix& mat, NtMatrix& result);
-
-int NtTranslateMat(Vector3 translate, NtMatrix& mat);
-int NtScaleMat(Vector3 scale, NtMatrix& mat);
-
-//Camera
-int NtCalculateViewMatrix(NtCamera& cameram, Vector3 u, Vector3 v, Vector3 n, Vector3 r);
-int NtCalculateProjectionMatrix(NtCamera& camera, float near, float far, float top, float bottom, float left, float right);
-int NtPutCamera(NtRender* render, NtCamera& camera);
-
 //Operator overloads
 inline Vector3 Vector3::operator*(const NtMatrix& mat) {
 	float x = mat.m[0][0] * this->x + mat.m[0][1] * this->y + mat.m[0][2] * this->z + mat.m[0][3];
@@ -326,10 +302,10 @@ typedef struct NtTransformation {
 }NtTransformation;
 typedef struct NtMaterial {
 	Vector3 surfaceColor;
-	float ambient;
-	float diffuse;
-	float specular;
-	float normal;
+	float Ka;
+	float Kd;
+	float Ks;
+	float specularExponent;
 } NtMaterial;
 typedef struct NtShape
 {
@@ -350,6 +326,44 @@ typedef struct  NtScene
 	NtLight directional;
 	NtLight ambient;
 } NtScene;
+
+/*Core Functions*/
+int NtSetShadingMode(NtRender* render, NT_SHADING_MODE mode);
+int NtNewFrameBuffer(NtPixel** frameBuffer, int width, int height);
+int NtNewDisplay(NtDisplay** display, int xRes, int yRes, Vector4 backgroundColor = { 0, 0, 0, 255 });
+int NtFreeDisplay(NtDisplay* display);
+int NtInitDisplay(NtDisplay* display, const Vector4& backgroundColor); //Default black
+int NtFlushDisplayBufferPPM(FILE* outfile, NtDisplay* display);
+int NtPutDisplay(NtDisplay* display, int i, int j, short r, short g, short b, short a);
+int ClipInt(int input, int min, int max);
+float Clipf(float input, int min, int max);
+
+int NtNewRender(NtRender** render, NtDisplay* display);
+int NtFreeRender(NtRender* render);
+int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], const NtMaterial& material);
+int NtPutTriangle(NtRender* render, NtTriangle& triangle, const NtMaterial& material);
+
+//////Perspective, Matrix//////
+void NtLoadIdentityMatrix(NtMatrix& mat);
+void NtPushMatrix(NtRender* render, const NtMatrix& matrix);
+void NtPopMatrix(NtRender* render);
+int NtGetTopMatrix(NtRender* render, NtMatrix& mat);
+int NtRotXMat(float degree, NtMatrix& mat);
+int NtRotYMat(float degree, NtMatrix& mat);
+int NtRotZMat(float degree, NtMatrix& mat);
+
+int NtInvertRotMat(const NtMatrix& mat, NtMatrix& result);
+int NtInvertScaleMat(const NtMatrix& mat, NtMatrix& result);
+int NtInvertTranslateMat(const NtMatrix& mat, NtMatrix& result);
+
+int NtTranslateMat(Vector3 translate, NtMatrix& mat);
+int NtScaleMat(Vector3 scale, NtMatrix& mat);
+
+//Camera
+int NtCalculateViewMatrix(NtCamera& cameram, Vector3 u, Vector3 v, Vector3 n, Vector3 r);
+int NtCalculateProjectionMatrix(NtCamera& camera, float near, float far, float top, float bottom, float left, float right);
+int NtPutCamera(NtRender* render, NtCamera& camera);
+
 int NtLoadSceneJSON(std::string scenePath, NtScene* scene);
 int NtLoadMesh(std::string meshName, const std::string meshExtension, NtScene* scene);
 int NtSetWorldMatrix(NtRender* render, NtMatrix& matrix, NtMatrix& matrixInverseTransposed);
@@ -357,6 +371,7 @@ int NtSetRenderAttributes(NtRender* render, NtScene* scene);
 int NtRenderScene(NtScene* scene, const std::string outputName, NT_SHADING_MODE shadingMode = NT_SHADE_FLAT);
 
 //Shading
-Vector3 NtShadeFlat(const Vector3& normal, const NtRender& render, const Vector3& baseColor);
+Vector3 NtShadeFlat(const Vector3& normal, const NtRender& render, const NtMaterial& material);
+Vector3 NtShadePhong(const NtMaterial& material, const Vector3& normal, const NtLight& lightSource, const Vector3& viewDirection, const NtLight& ambientLight);
 Vector3 NtAverageQuadNormals(const Vector3 normalList[]);
 Vector3 NtInterpolateVector3(const Vector3 vectors[], float alpha, float beta, float gamma, bool isNormal);

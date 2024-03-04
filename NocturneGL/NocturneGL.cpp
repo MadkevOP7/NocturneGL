@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 #include "json.hpp"
+#include <math.h>
 class NTMath {
 public:
 	//Barycentric Coordinates
@@ -153,6 +154,16 @@ int ClipInt(int input, int min, int max) {
 	return input;
 }
 
+float Min(float a, float b) {
+	if (a < b)return a;
+	return b;
+}
+
+float Max(float a, float b) {
+	if (a > b)return a;
+	return b;
+}
+
 float Clipf(float input, int min, int max) {
 	if (input < min) return min;
 	if (input > max) return max;
@@ -240,7 +251,7 @@ int NtFreeRender(NtRender* render) {
 /// <param name="normalList"></param>
 /// <param name="color"></param>
 /// <returns></returns>
-int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], const Vector3& baseColor) {
+int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], const NtMaterial& material) {
 	if (render == nullptr) return NT_FAILURE;
 
 	//Transform vertex and normals
@@ -312,10 +323,14 @@ int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], 
 					Vector3 finalColor;
 					switch (render->shadingMode) {
 					case NT_SHADE_FLAT:
-						finalColor = NtShadeFlat(NtAverageQuadNormals(normalList), *render, baseColor);
+						finalColor = NtShadeFlat(NtAverageQuadNormals(normalList), *render, material);
+						break;
+
+					case NT_SHADE_PHONG:
+						Vector3 interpolatedNormal = NtInterpolateVector3(normalList, alpha, beta, gamma, true);
+						finalColor = NtShadePhong(material, interpolatedNormal, render->directionalLight, render->camera->viewDirection, render->ambientLight);
 						break;
 					}
-
 					NtPutDisplay(render->display, x, y, NTMath::fts(finalColor.x), NTMath::fts(finalColor.y), NTMath::fts(finalColor.z), 255);
 				}
 			}
@@ -323,7 +338,7 @@ int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], 
 	}
 }
 
-int NtPutTriangle(NtRender* render, NtTriangle& triangle, const Vector3& baseColor) {
+int NtPutTriangle(NtRender* render, NtTriangle& triangle, const NtMaterial& material) {
 	if (render == nullptr) return NT_FAILURE;
 	Vector3 vertexList[3];
 	vertexList[0] = triangle.v0.vertexPos;
@@ -335,7 +350,7 @@ int NtPutTriangle(NtRender* render, NtTriangle& triangle, const Vector3& baseCol
 	normalList[1] = triangle.v1.vertexNormal;
 	normalList[2] = triangle.v2.vertexNormal;
 
-	return NtPutTriangle(render, vertexList, normalList, baseColor);
+	return NtPutTriangle(render, vertexList, normalList, material);
 }
 //////Transormations//////
 
@@ -616,10 +631,10 @@ int NtLoadSceneJSON(std::string scenePath, NtScene* scene) {
 				shape.material.surfaceColor.x = material["Cs"][0];
 				shape.material.surfaceColor.y = material["Cs"][1];
 				shape.material.surfaceColor.z = material["Cs"][2];
-				shape.material.ambient = material["Ka"];
-				shape.material.diffuse = material["Kd"];
-				shape.material.specular = material["Ks"];
-				shape.material.normal = material["n"];
+				shape.material.Ka = material["Ka"];
+				shape.material.Kd = material["Kd"];
+				shape.material.Ks = material["Ks"];
+				shape.material.specularExponent = material["n"];
 
 				//Write transformations
 				const auto& transforms = shapeValue["transforms"];
@@ -763,7 +778,7 @@ int NtRenderScene(NtScene* scene, const std::string outputName, NT_SHADING_MODE 
 	//Calculate camerae matrix, we need to calculate u, v, n, r
 	Vector3 n = (scene->camera.from - scene->camera.to);
 	n.normalize();
-
+	scene->camera.viewDirection = n;
 	//Assume world up
 	Vector3 worldUp = { 0, 1, 0 };
 
@@ -812,7 +827,7 @@ int NtRenderScene(NtScene* scene, const std::string outputName, NT_SHADING_MODE 
 		//Render faces of that model
 		NtMesh* mesh = scene->meshMap[shape.geometryId];
 		for (NtTriangle& triangle : mesh->triangles) {
-			NtPutTriangle(renderPtr, triangle, shape.material.surfaceColor);
+			NtPutTriangle(renderPtr, triangle, shape.material);
 		}
 	}
 
@@ -858,7 +873,37 @@ Vector3 NtInterpolateVector3(const Vector3 vectors[], float alpha, float beta, f
 	return result;
 }
 
-Vector3 NtShadeFlat(const Vector3& normal, const NtRender& render, const Vector3& baseColor) {
+Vector3 NtShadePhong(const NtMaterial& material, const Vector3& normal, const NtLight& lightSource, const Vector3& viewDirection, const NtLight& ambientLight) {
+	//Lighting = ambient + diffuse + specular
+	Vector3 lighting;
+
+	Vector3 _ambient = ambientLight.color * ambientLight.intensity;
+
+	//Diffuse
+	Vector3 _normal = normal;
+	_normal.normalize();
+	float diffuseStrength = Max(lightSource.direction.dot(_normal), 0);
+	Vector3 _diffuse = lightSource.color * diffuseStrength * lightSource.intensity;
+
+	//Specular
+	Vector3 reflection = Vector3::reflect(lightSource.direction * -1, _normal);
+	reflection.normalize();
+	float specularStrength = Max(Vector3::dot(viewDirection, reflection), 0);
+	specularStrength = std::powf(specularStrength, material.specularExponent);
+	Vector3 _specular = lightSource.color * specularStrength * lightSource.intensity;
+
+	lighting = _ambient * material.Ka + _diffuse * material.Kd + _specular * material.Ks;
+
+	Vector3 color = material.surfaceColor * lighting;
+
+	color.x = Clipf(color.x, 0, 1);
+	color.y = Clipf(color.y, 0, 1);
+	color.z = Clipf(color.z, 0, 1);
+
+	return color;
+}
+
+Vector3 NtShadeFlat(const Vector3& normal, const NtRender& render, const NtMaterial& material) {
 	float dotp = render.directionalLight.direction.dot(normal);
 
 	dotp = Clipf(dotp, 0, 1);
@@ -866,15 +911,15 @@ Vector3 NtShadeFlat(const Vector3& normal, const NtRender& render, const Vector3
 
 	//Calculate diffuse from directional
 	Vector3 diffuse;
-	diffuse.x = baseColor.x * render.directionalLight.color.x * dotp * render.directionalLight.intensity;
-	diffuse.y = baseColor.y * render.directionalLight.color.y * dotp * render.directionalLight.intensity;
-	diffuse.z = baseColor.z * render.directionalLight.color.z * dotp * render.directionalLight.intensity;
+	diffuse.x = material.surfaceColor.x * render.directionalLight.color.x * dotp * render.directionalLight.intensity;
+	diffuse.y = material.surfaceColor.y * render.directionalLight.color.y * dotp * render.directionalLight.intensity;
+	diffuse.z = material.surfaceColor.z * render.directionalLight.color.z * dotp * render.directionalLight.intensity;
 
 	//Calculate the ambient light 
 	Vector3 ambient;
-	ambient.x = baseColor.x * render.ambientLight.color.x * render.ambientLight.intensity;
-	ambient.y = baseColor.y * render.ambientLight.color.y * render.ambientLight.intensity;
-	ambient.z = baseColor.z * render.ambientLight.color.z * render.ambientLight.intensity;
+	ambient.x = material.surfaceColor.x * render.ambientLight.color.x * render.ambientLight.intensity;
+	ambient.y = material.surfaceColor.y * render.ambientLight.color.y * render.ambientLight.intensity;
+	ambient.z = material.surfaceColor.z * render.ambientLight.color.z * render.ambientLight.intensity;
 
 	//Combine ambient with diffuse
 	Vector3 triColor;
