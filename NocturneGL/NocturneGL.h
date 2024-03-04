@@ -372,6 +372,6 @@ int NtRenderScene(NtScene* scene, const std::string outputName, NT_SHADING_MODE 
 
 //Shading
 Vector3 NtShadeFlat(const Vector3& normal, const NtRender& render, const NtMaterial& material);
-Vector3 NtShadePhong(const NtMaterial& material, const Vector3& normal, const NtLight& lightSource, const Vector3& viewDirection, const NtLight& ambientLight);
+Vector3 NtLightingPhong(const NtMaterial& material, const Vector3& normal, const NtLight& lightSource, const Vector3& viewDirection, const NtLight& ambientLight);
 Vector3 NtAverageQuadNormals(const Vector3 normalList[]);
 Vector3 NtInterpolateVector3(const Vector3 vectors[], float alpha, float beta, float gamma, bool isNormal);

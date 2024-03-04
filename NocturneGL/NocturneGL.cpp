@@ -323,12 +323,12 @@ int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], 
 					Vector3 finalColor;
 					switch (render->shadingMode) {
 					case NT_SHADE_FLAT:
-						finalColor = NtShadeFlat(NtAverageQuadNormals(normalList), *render, material);
+						finalColor = NtLightingPhong(material, NtAverageQuadNormals(normalList), render->directionalLight, render->camera->viewDirection, render->ambientLight);
 						break;
 
 					case NT_SHADE_PHONG:
 						Vector3 interpolatedNormal = NtInterpolateVector3(normalList, alpha, beta, gamma, true);
-						finalColor = NtShadePhong(material, interpolatedNormal, render->directionalLight, render->camera->viewDirection, render->ambientLight);
+						finalColor = NtLightingPhong(material, interpolatedNormal, render->directionalLight, render->camera->viewDirection, render->ambientLight);
 						break;
 					}
 					NtPutDisplay(render->display, x, y, NTMath::fts(finalColor.x), NTMath::fts(finalColor.y), NTMath::fts(finalColor.z), 255);
@@ -873,7 +873,7 @@ Vector3 NtInterpolateVector3(const Vector3 vectors[], float alpha, float beta, f
 	return result;
 }
 
-Vector3 NtShadePhong(const NtMaterial& material, const Vector3& normal, const NtLight& lightSource, const Vector3& viewDirection, const NtLight& ambientLight) {
+Vector3 NtLightingPhong(const NtMaterial& material, const Vector3& normal, const NtLight& lightSource, const Vector3& viewDirection, const NtLight& ambientLight) {
 	//Lighting = ambient + diffuse + specular
 	Vector3 lighting;
 
@@ -882,13 +882,20 @@ Vector3 NtShadePhong(const NtMaterial& material, const Vector3& normal, const Nt
 	//Diffuse
 	Vector3 _normal = normal;
 	_normal.normalize();
-	float diffuseStrength = Max(lightSource.direction.dot(_normal), 0);
+	Vector3 lightVector = lightSource.direction * -1;
+	lightVector.normalize();
+
+	float diffuseStrength = Max(lightVector.dot(_normal), 0);
 	Vector3 _diffuse = lightSource.color * diffuseStrength * lightSource.intensity;
 
 	//Specular
-	Vector3 reflection = Vector3::reflect(lightSource.direction * -1, _normal);
+	Vector3 reflection = Vector3::reflect(lightVector, _normal);
 	reflection.normalize();
-	float specularStrength = Max(Vector3::dot(viewDirection, reflection), 0);
+
+	Vector3 viewVector = viewDirection * -1;
+	viewVector.normalize();
+
+	float specularStrength = Max(Vector3::dot(viewVector, reflection), 0);
 	specularStrength = std::powf(specularStrength, material.specularExponent);
 	Vector3 _specular = lightSource.color * specularStrength * lightSource.intensity;
 
