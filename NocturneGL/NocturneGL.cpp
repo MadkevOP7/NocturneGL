@@ -30,6 +30,21 @@ public:
 		return degrees * static_cast<float>(NT_PI) / 180.0f;
 	}
 };
+
+/// <summary>
+/// Sets the render's shading mode, return NT_FAILURE if render pointer is null
+/// </summary>
+/// <param name="render"></param>
+/// <param name="mode"></param>
+/// <returns></returns>
+int NtSetShadingMode(NtRender* render, NT_SHADING_MODE mode) {
+	if (render == nullptr)
+		return NT_FAILURE;
+
+	render->shadingMode = mode;
+	return NT_SUCCESS;
+}
+
 /// <summary>
 /// Creates a frame buffer and allocates memory of size NtPixel x width x height and passes back pointer
 /// </summary>
@@ -225,13 +240,17 @@ int NtFreeRender(NtRender* render) {
 /// <param name="normalList"></param>
 /// <param name="color"></param>
 /// <returns></returns>
-int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], Vector3 color) {
+int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], const Vector3& baseColor) {
 	if (render == nullptr) return NT_FAILURE;
 
+	//Transform vertex and normals
 	for (int i = 0; i < 3; i++) {
 		Vector4 vec4(vertexList[i].x, vertexList[i].y, vertexList[i].z, 1);
+		Vector4 vec4Normal(normalList[i].x, normalList[i].y, normalList[i].z, 0);
 		Vector4 worldResult = vec4 * render->worldMatrix;
+		Vector4 worldResultNormal = vec4Normal * render->worldMatrixInverseTransposed;
 		Vector4 camResult = worldResult * render->camera->viewMatrix;
+		Vector4 camResultNormal = worldResultNormal * render->camera->viewMatrix;
 		Vector4 ndcResult = camResult * render->camera->projectMatrix;
 		//Write result back to vector3 
 		vertexList[i].x = ndcResult.x / ndcResult.w;
@@ -242,6 +261,11 @@ int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], 
 		vertexList[i].x = (vertexList[i].x + 1) * ((render->display->xRes - 1) / 2);
 		vertexList[i].y = (1 - vertexList[i].y) * ((render->display->yRes - 1) / 2);
 
+		//Write normal result back
+		normalList[i].x = camResultNormal.x;
+		normalList[i].y = camResultNormal.y;
+		normalList[i].z = camResultNormal.z;
+		normalList[i].normalize();
 	}
 
 	//Clip x,y,z to display bounds
@@ -283,14 +307,23 @@ int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], 
 				if (currZ < render->zBuffer[x][y]) {
 					// Update the Z-buffer
 					render->zBuffer[x][y] = currZ;
-					NtPutDisplay(render->display, x, y, NTMath::fts(color.x), NTMath::fts(color.y), NTMath::fts(color.z), 255);
+
+					//Compute Color - Shading
+					Vector3 finalColor;
+					switch (render->shadingMode) {
+					case NT_SHADE_FLAT:
+						finalColor = NtShadeFlat(NtAverageQuadNormals(normalList), *render, baseColor);
+						break;
+					}
+
+					NtPutDisplay(render->display, x, y, NTMath::fts(finalColor.x), NTMath::fts(finalColor.y), NTMath::fts(finalColor.z), 255);
 				}
 			}
 		}
 	}
 }
 
-int NtPutTriangle(NtRender* render, NtTriangle& triangle) {
+int NtPutTriangle(NtRender* render, NtTriangle& triangle, const Vector3& baseColor) {
 	if (render == nullptr) return NT_FAILURE;
 	Vector3 vertexList[3];
 	vertexList[0] = triangle.v0.vertexPos;
@@ -302,13 +335,7 @@ int NtPutTriangle(NtRender* render, NtTriangle& triangle) {
 	normalList[1] = triangle.v1.vertexNormal;
 	normalList[2] = triangle.v2.vertexNormal;
 
-	//Todo: compute color
-	Vector3 color;
-	color.x = 0.81f;
-	color.y = 0.55f;
-	color.z = 0.75f;
-
-	return NtPutTriangle(render, vertexList, normalList, color);
+	return NtPutTriangle(render, vertexList, normalList, baseColor);
 }
 //////Transormations//////
 
@@ -329,8 +356,9 @@ void NtLoadIdentityMatrix(NtMatrix& mat) {
 /// </summary>
 /// <param name="matrix"></param>
 /// <returns></returns>
-int NtSetWorldMatrix(NtRender* render, NtMatrix& matrix) {
+int NtSetWorldMatrix(NtRender* render, NtMatrix& matrix, NtMatrix& matrixInverseTransposed) {
 	render->worldMatrix = matrix;
+	render->worldMatrixInverseTransposed = matrixInverseTransposed;
 	return NT_SUCCESS;
 }
 
@@ -450,6 +478,51 @@ void NtPopMatrix(NtRender* render) {
 int NtGetTopMatrix(NtRender* render, NtMatrix& mat) {
 	if (render->matrixStack.size() == 0) return NT_FAILURE;
 	mat = render->matrixStack.back();
+	return NT_SUCCESS;
+}
+
+/// <summary>
+/// Inverts a rotation matrix, essentially the transpose of it
+/// </summary>
+/// <param name="mat"></param>
+/// <returns></returns>
+int NtInvertRotMat(const NtMatrix& mat, NtMatrix& result) {
+	result = mat.transpose();
+	return NT_SUCCESS;
+}
+
+/// <summary>
+/// Inverts the scale matrix, where the diagnol scale are the reciprocal of the original
+/// </summary>
+/// <param name="mat"></param>
+/// <param name="result"></param>
+/// <returns></returns>
+int NtInvertScaleMat(const NtMatrix& mat, NtMatrix& result) {
+	NtLoadIdentityMatrix(result);
+	//Ignores w component
+	for (int i = 0; i < 3; ++i) {
+
+		//Check for division by zero
+		if (mat[i][i] == 0)
+			return NT_FAILURE;
+
+		result[i][i] = 1.0f / mat[i][i];
+	}
+
+	return NT_SUCCESS;
+}
+
+/// <summary>
+/// Inverts the translation, where the translation is negated from the original
+/// </summary>
+/// <param name="mat"></param>
+/// <param name="result"></param>
+/// <returns></returns>
+int NtInvertTranslateMat(const NtMatrix& mat, NtMatrix& result) {
+	result = mat;
+	result[0][3] = -mat[0][3];
+	result[1][3] = -mat[1][3];
+	result[2][3] = -mat[2][3];
 	return NT_SUCCESS;
 }
 
@@ -592,7 +665,34 @@ int NtLoadSceneJSON(std::string scenePath, NtScene* scene) {
 			scene->camera.xRes = cameraValue["resolution"][0];
 			scene->camera.yRes = cameraValue["resolution"][1];
 		}
-		std::cout << "Scene parsing completed!";
+
+		//Parse lights
+		if (jsonData["scene"].find("lights") != jsonData["scene"].end()) {
+			for (const auto& lightValue : jsonData["scene"]["lights"]) {
+				NtLight light;
+
+				// Common properties
+				light.color = Vector3(lightValue["color"][0], lightValue["color"][1], lightValue["color"][2]);
+				light.intensity = lightValue["intensity"];
+
+				std::string typeStr = lightValue["type"];
+				if (typeStr == "ambient") {
+					light.type = NT_LIGHT_AMBIENT;
+					scene->ambient = light;
+				}
+				else if (typeStr == "directional") {
+					light.type = NT_LIGHT_DIRECTIONAL;
+					Vector3 from = Vector3(lightValue["from"][0], lightValue["from"][1], lightValue["from"][2]);
+					Vector3 to = Vector3(lightValue["to"][0], lightValue["to"][1], lightValue["to"][2]);
+
+					scene->directional = light;
+					scene->directional.direction = to - from;
+					scene->directional.direction.normalize();
+				}
+				scene->lights.push_back(light);
+			}
+		}
+		std::cout << "Scene parsing completed!\n";
 		return NT_SUCCESS;
 	}
 	catch (const std::exception& e) {
@@ -646,13 +746,15 @@ int NtLoadMesh(const std::string meshName, const std::string meshExtension, NtSc
 /// <param name="scene"></param>
 /// <param name="outputName"></param>
 /// <returns></returns>
-int NtRenderScene(NtScene* scene, const std::string outputName) {
+int NtRenderScene(NtScene* scene, const std::string outputName, NT_SHADING_MODE shadingMode) {
 	int status = 0;
 	NtDisplay* displayPtr;
 	status |= NtNewDisplay(&displayPtr, scene->camera.xRes, scene->camera.yRes);
 	NtRender* renderPtr;
 	status |= NtNewRender(&renderPtr, displayPtr);
-	if (status) exit(NT_FAILURE);
+	status |= NtSetRenderAttributes(renderPtr, scene);
+	status |= NtSetShadingMode(renderPtr, shadingMode);
+	if (status) return NT_FAILURE;
 
 
 	//Put camera and matrix
@@ -686,20 +788,31 @@ int NtRenderScene(NtScene* scene, const std::string outputName) {
 		NtRotXMat(shape.transforms.rotation.x, xRot);
 
 		NtMatrix combinedRotation = zRot * yRot * xRot;
+		NtMatrix combinedRotationInversed;
+		NtInvertRotMat(combinedRotation, combinedRotationInversed);
 
 		NtMatrix scale;
 		NtScaleMat(shape.transforms.scale, scale);
+		NtMatrix scaleInversed;
+		NtInvertScaleMat(scale, scaleInversed);
 
 		NtMatrix translation;
 		NtTranslateMat(shape.transforms.translation, translation);
+		NtMatrix translationInversed;
+		NtInvertTranslateMat(translation, translationInversed);
 
+		//Forward transformation order is scale -> rotation -> translation
+		//But matrix multiplication first multiplied is last applied
+
+		//For inverse transformation, the order is reversed forward
 		NtMatrix combinedTransformation = translation * combinedRotation * scale;
-
-		NtSetWorldMatrix(renderPtr, combinedTransformation);
+		NtMatrix combinedTransformationInversed = scaleInversed * combinedRotationInversed * translationInversed;
+		combinedRotationInversed.transpose();
+		NtSetWorldMatrix(renderPtr, combinedTransformation, combinedTransformationInversed);
 		//Render faces of that model
 		NtMesh* mesh = scene->meshMap[shape.geometryId];
 		for (NtTriangle& triangle : mesh->triangles) {
-			NtPutTriangle(renderPtr, triangle);
+			NtPutTriangle(renderPtr, triangle, shape.material.surfaceColor);
 		}
 	}
 
@@ -712,4 +825,66 @@ int NtRenderScene(NtScene* scene, const std::string outputName) {
 	}
 	NtFlushDisplayBufferPPM(outfile, displayPtr);
 	return NT_SUCCESS;
+}
+
+/// <summary>
+/// Sets the render attribute based on scene data
+/// </summary>
+/// <param name="render"></param>
+/// <param name="scene"></param>
+/// <returns></returns>
+int NtSetRenderAttributes(NtRender* render, NtScene* scene) {
+	if (render == nullptr || scene == nullptr)
+		return NT_FAILURE;
+
+	render->lights = scene->lights;
+	render->directionalLight = scene->directional;
+	render->ambientLight = scene->ambient;
+	return NT_SUCCESS;
+}
+
+///////Shading//////////
+Vector3 NtAverageQuadNormals(const Vector3 normalList[]) {
+	Vector3 additionResult = normalList[0] + normalList[1] + normalList[2];
+	additionResult = additionResult / 3.0f;
+	additionResult.normalize();
+	return additionResult;
+}
+
+Vector3 NtInterpolateVector3(const Vector3 vectors[], float alpha, float beta, float gamma, bool isNormal) {
+	Vector3 result = vectors[0] * alpha + vectors[1] * beta + vectors[2] * gamma;
+	if (isNormal)
+		result.normalize();
+	return result;
+}
+
+Vector3 NtShadeFlat(const Vector3& normal, const NtRender& render, const Vector3& baseColor) {
+	float dotp = render.directionalLight.direction.dot(normal);
+
+	dotp = Clipf(dotp, 0, 1);
+	dotp *= render.directionalLight.intensity;
+
+	//Calculate diffuse from directional
+	Vector3 diffuse;
+	diffuse.x = baseColor.x * render.directionalLight.color.x * dotp * render.directionalLight.intensity;
+	diffuse.y = baseColor.y * render.directionalLight.color.y * dotp * render.directionalLight.intensity;
+	diffuse.z = baseColor.z * render.directionalLight.color.z * dotp * render.directionalLight.intensity;
+
+	//Calculate the ambient light 
+	Vector3 ambient;
+	ambient.x = baseColor.x * render.ambientLight.color.x * render.ambientLight.intensity;
+	ambient.y = baseColor.y * render.ambientLight.color.y * render.ambientLight.intensity;
+	ambient.z = baseColor.z * render.ambientLight.color.z * render.ambientLight.intensity;
+
+	//Combine ambient with diffuse
+	Vector3 triColor;
+	triColor.x = diffuse.x + ambient.x;
+	triColor.y = diffuse.y + ambient.y;
+	triColor.z = diffuse.z + ambient.z;
+
+	// Ensure the final color components are within the range [0, 1]
+	triColor.x = Clipf(triColor.x, 0, 1);
+	triColor.y = Clipf(triColor.y, 0, 1);
+	triColor.z = Clipf(triColor.z, 0, 1);
+	return triColor;
 }

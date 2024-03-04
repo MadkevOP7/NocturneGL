@@ -20,6 +20,17 @@ typedef struct {
 #define NT_FAILURE      1
 #define NT_PI 3.1415926
 
+enum NT_SHADING_MODE {
+	NT_SHADE_FLAT,
+	NT_SHADE_PHONG,
+	NT_SHADE_GOURAUD
+};
+
+enum NT_LIGHT_TYPE {
+	NT_LIGHT_AMBIENT,
+	NT_LIGHT_DIRECTIONAL
+};
+
 struct NtMatrix;
 struct Vector3;
 struct Vector4;
@@ -64,9 +75,21 @@ struct Vector3 {
 
 	inline Vector3 operator*(const NtMatrix& mat);
 
+	Vector3 operator/(const float scalar) const {
+		return { x / scalar, y / scalar, z / scalar };
+	}
+
+	Vector3 operator*(const float scalar) const {
+		return { x * scalar, y * scalar, z * scalar };
+	}
+
 	// Vector subtraction
 	Vector3 operator-(const Vector3& other) const {
 		return { x - other.x, y - other.y, z - other.z };
+	}
+
+	Vector3 operator+(const Vector3& other) const {
+		return { x + other.x, y + other.y, z + other.z };
 	}
 
 	// Normalize the vector
@@ -93,6 +116,9 @@ struct Vector3 {
 		return x * other.x + y * other.y + z * other.z;
 	}
 
+	float dot(const Vector3& other) const {
+		return x * other.x + y * other.y + z * other.z;
+	}
 };
 
 struct Vector2 {
@@ -111,14 +137,6 @@ struct Vector2 {
 	// Constructor for initializing Vector2 from an array of 2 values
 	Vector2(const float values[2]) : x(values[0]), y(values[1]) {}
 };
-
-/*Rendering*/
-typedef struct {
-	unsigned short	xRes;
-	unsigned short	yRes;
-	short			open;
-	NtPixel* frameBuffer;		/* frame buffer array */
-} NtDisplay;
 
 typedef struct NtMatrix {
 	float m[4][4];
@@ -163,7 +181,34 @@ typedef struct NtMatrix {
 		}
 		return result;
 	}
+
+	NtMatrix transpose() const {
+		NtMatrix result;
+		for (int i = 0; i < 4; ++i) {
+			for (int j = 0; j < 4; ++j) {
+				result.m[i][j] = this->m[j][i];
+			}
+		}
+		return result;
+	}
 } NtMatrix;
+
+struct NtLight {
+	NT_LIGHT_TYPE type;
+	Vector3 color;
+	float intensity;
+
+	//For directional
+	Vector3 direction;
+};
+
+/*Rendering*/
+typedef struct {
+	unsigned short	xRes;
+	unsigned short	yRes;
+	short			open;
+	NtPixel* frameBuffer;		/* frame buffer array */
+} NtDisplay;
 
 typedef struct NtVertex {
 	Vector3 vertexPos;
@@ -192,17 +237,6 @@ typedef struct NtCamera
 	int xRes;
 	int yRes;
 } NzCamera;
-
-/*Core Functions*/
-int NtNewFrameBuffer(NtPixel** frameBuffer, int width, int height);
-int NtNewDisplay(NtDisplay** display, int xRes, int yRes, Vector4 backgroundColor = { 0, 0, 0, 255 });
-int NtFreeDisplay(NtDisplay* display);
-int NtInitDisplay(NtDisplay* display, const Vector4& backgroundColor); //Default black
-int NtFlushDisplayBufferPPM(FILE* outfile, NtDisplay* display);
-int NtPutDisplay(NtDisplay* display, int i, int j, short r, short g, short b, short a);
-int ClipInt(int input, int min, int max);
-float Clipf(float input, int min, int max);
-
 /*Renderer*/
 typedef struct {
 	NtDisplay* display;
@@ -210,6 +244,11 @@ typedef struct {
 	NtCamera* camera;
 	std::vector<NtMatrix> matrixStack;
 	NtMatrix worldMatrix; //Object to world
+	NtMatrix worldMatrixInverseTransposed; //For normal
+	NT_SHADING_MODE shadingMode;
+	std::vector<NtLight> lights;
+	NtLight directionalLight;
+	NtLight ambientLight;
 }  NtRender;
 
 
@@ -222,10 +261,21 @@ typedef struct  NtInput
 	NtCamera		camera;			/* camera */
 } NtInput;
 
+/*Core Functions*/
+int NtSetShadingMode(NtRender* render, NT_SHADING_MODE mode);
+int NtNewFrameBuffer(NtPixel** frameBuffer, int width, int height);
+int NtNewDisplay(NtDisplay** display, int xRes, int yRes, Vector4 backgroundColor = { 0, 0, 0, 255 });
+int NtFreeDisplay(NtDisplay* display);
+int NtInitDisplay(NtDisplay* display, const Vector4& backgroundColor); //Default black
+int NtFlushDisplayBufferPPM(FILE* outfile, NtDisplay* display);
+int NtPutDisplay(NtDisplay* display, int i, int j, short r, short g, short b, short a);
+int ClipInt(int input, int min, int max);
+float Clipf(float input, int min, int max);
+
 int NtNewRender(NtRender** render, NtDisplay* display);
 int NtFreeRender(NtRender* render);
-int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], Vector3 color);
-int NtPutTriangle(NtRender* render, NtTriangle& triangle);
+int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], const Vector3& baseColor);
+int NtPutTriangle(NtRender* render, NtTriangle& triangle, const Vector3& baseColor);
 
 //////Perspective, Matrix//////
 void NtLoadIdentityMatrix(NtMatrix& mat);
@@ -235,6 +285,11 @@ int NtGetTopMatrix(NtRender* render, NtMatrix& mat);
 int NtRotXMat(float degree, NtMatrix& mat);
 int NtRotYMat(float degree, NtMatrix& mat);
 int NtRotZMat(float degree, NtMatrix& mat);
+
+int NtInvertRotMat(const NtMatrix& mat, NtMatrix& result);
+int NtInvertScaleMat(const NtMatrix& mat, NtMatrix& result);
+int NtInvertTranslateMat(const NtMatrix& mat, NtMatrix& result);
+
 int NtTranslateMat(Vector3 translate, NtMatrix& mat);
 int NtScaleMat(Vector3 scale, NtMatrix& mat);
 
@@ -264,7 +319,8 @@ inline Vector4 Vector4::operator*(const NtMatrix& mat) {
 
 //Scene
 typedef struct NtTransformation {
-	Vector3 scale; //Each x, y, z is rotation around that axis in degrees
+	Vector3 scale = Vector3(1, 1, 1);
+	//Each x, y, z is rotation around that axis in degrees
 	Vector3 rotation;
 	Vector3 translation;
 }NtTransformation;
@@ -290,8 +346,17 @@ typedef struct  NtScene
 	std::vector<NtShape> shapes;
 	NtCamera camera;
 	std::unordered_map<std::string, NtMesh*> meshMap;
+	std::vector<NtLight> lights;
+	NtLight directional;
+	NtLight ambient;
 } NtScene;
 int NtLoadSceneJSON(std::string scenePath, NtScene* scene);
 int NtLoadMesh(std::string meshName, const std::string meshExtension, NtScene* scene);
-int NtSetWorldMatrix(NtRender* render, NtMatrix& matrix);
-int NtRenderScene(NtScene* scene, const std::string outputName);
+int NtSetWorldMatrix(NtRender* render, NtMatrix& matrix, NtMatrix& matrixInverseTransposed);
+int NtSetRenderAttributes(NtRender* render, NtScene* scene);
+int NtRenderScene(NtScene* scene, const std::string outputName, NT_SHADING_MODE shadingMode = NT_SHADE_FLAT);
+
+//Shading
+Vector3 NtShadeFlat(const Vector3& normal, const NtRender& render, const Vector3& baseColor);
+Vector3 NtAverageQuadNormals(const Vector3 normalList[]);
+Vector3 NtInterpolateVector3(const Vector3 vectors[], float alpha, float beta, float gamma, bool isNormal);
