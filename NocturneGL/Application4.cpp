@@ -37,7 +37,7 @@ int Render_4(int width, int height, const std::string output)
 	std::cout << "\nNocturne Renderer load scene completed in " << duration.count() << " milliseconds.\n";
 
 	start = std::chrono::high_resolution_clock::now();
-	status |= NtRenderScene(scene, output, NT_SHADE_FLAT);
+	status |= NtRenderScene(scene, output, NT_SHADE_GOURAUD);
 	stop = std::chrono::high_resolution_clock::now();
 	duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
 

@@ -334,6 +334,7 @@ int NtNewDisplay(NtDisplay** display, int xRes, int yRes, Vector4 backgroundColo
 int NtFreeDisplay(NtDisplay* display);
 int NtInitDisplay(NtDisplay* display, const Vector4& backgroundColor); //Default black
 int NtFlushDisplayBufferPPM(FILE* outfile, NtDisplay* display);
+int NtFlushDisplayBufferJPEG(FILE* outfile, NtDisplay* display);
 int NtPutDisplay(NtDisplay* display, int i, int j, short r, short g, short b, short a);
 int ClipInt(int input, int min, int max);
 float Clipf(float input, int min, int max);

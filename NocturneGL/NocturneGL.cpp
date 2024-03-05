@@ -3,7 +3,7 @@
 #include "NocturneGL.h"
 #include <cmath>
 #include <limits>
-#include "json.hpp"
+#include "externalPlugins/json.hpp"
 #include <math.h>
 class NTMath {
 public:
@@ -110,10 +110,10 @@ int NtInitDisplay(NtDisplay* display, const Vector4& backgroundColor)
 	//Todo: we could cache buffer size
 	int bufferSize = display->xRes * display->yRes * sizeof(NtPixel);
 	for (int i = 0; i < bufferSize; i++) {
-		display->frameBuffer[i].r = backgroundColor.x;
-		display->frameBuffer[i].g = backgroundColor.y;
-		display->frameBuffer[i].b = backgroundColor.z;
-		display->frameBuffer[i].a = backgroundColor.w;
+		display->frameBuffer[i].r = NTMath::fts(backgroundColor.x);
+		display->frameBuffer[i].g = NTMath::fts(backgroundColor.y);
+		display->frameBuffer[i].b = NTMath::fts(backgroundColor.z);
+		display->frameBuffer[i].a = NTMath::fts(backgroundColor.w);
 	}
 
 	return NT_SUCCESS;
@@ -195,6 +195,11 @@ int NtFlushDisplayBufferPPM(FILE* outfile, NtDisplay* display)
 		fprintf(outfile, "\n"); // Newline after each row of pixels
 	}
 	return NT_SUCCESS;
+}
+
+// Callback function for stb_image_write to write to FILE*
+void write_func(void* context, void* data, int size) {
+	fwrite(data, 1, size, (FILE*)context);
 }
 
 /*Renderer*/
@@ -302,6 +307,23 @@ int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], 
 	int yMin = std::floor(yMinf);
 	int xMax = std::ceil(xMaxf);
 	int yMax = std::ceil(yMaxf);
+
+	//Lighting pre-compute for flat and gouraud
+	//Compute Color - Shading
+	Vector3 finalColor;
+	Vector3 vertexColors[3];
+	switch (render->shadingMode) {
+	case NT_SHADE_FLAT:
+		finalColor = NtLightingPhong(material, NtAverageQuadNormals(normalList), render->directionalLight, render->camera->viewDirection, render->ambientLight);
+		break;
+
+	case NT_SHADE_GOURAUD:
+		for (int i = 0; i < 3; i++) {
+			vertexColors[i] = NtLightingPhong(material, normalList[i], render->directionalLight, render->camera->viewDirection, render->ambientLight);
+		}
+		break;
+	}
+	//Rasterization
 	for (int y = yMin; y <= yMax; y++) {
 		for (int x = xMin; x <= xMax; x++) {
 			Vector3 v0 = vertexList[0];
@@ -319,17 +341,13 @@ int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], 
 					// Update the Z-buffer
 					render->zBuffer[x][y] = currZ;
 
-					//Compute Color - Shading
-					Vector3 finalColor;
-					switch (render->shadingMode) {
-					case NT_SHADE_FLAT:
-						finalColor = NtLightingPhong(material, NtAverageQuadNormals(normalList), render->directionalLight, render->camera->viewDirection, render->ambientLight);
-						break;
-
-					case NT_SHADE_PHONG:
+					//Compute Color - Phong (interpolate normals and light compute per pixel)
+					if (render->shadingMode == NT_SHADE_PHONG) {
 						Vector3 interpolatedNormal = NtInterpolateVector3(normalList, alpha, beta, gamma, true);
 						finalColor = NtLightingPhong(material, interpolatedNormal, render->directionalLight, render->camera->viewDirection, render->ambientLight);
-						break;
+					}
+					else if (render->shadingMode == NT_SHADE_GOURAUD) {
+						finalColor = NtInterpolateVector3(vertexColors, alpha, beta, gamma, false);
 					}
 					NtPutDisplay(render->display, x, y, NTMath::fts(finalColor.x), NTMath::fts(finalColor.y), NTMath::fts(finalColor.z), 255);
 				}
@@ -764,7 +782,7 @@ int NtLoadMesh(const std::string meshName, const std::string meshExtension, NtSc
 int NtRenderScene(NtScene* scene, const std::string outputName, NT_SHADING_MODE shadingMode) {
 	int status = 0;
 	NtDisplay* displayPtr;
-	status |= NtNewDisplay(&displayPtr, scene->camera.xRes, scene->camera.yRes);
+	status |= NtNewDisplay(&displayPtr, scene->camera.xRes, scene->camera.yRes, Vector4(1, 1, 1, 1));
 	NtRender* renderPtr;
 	status |= NtNewRender(&renderPtr, displayPtr);
 	status |= NtSetRenderAttributes(renderPtr, scene);
