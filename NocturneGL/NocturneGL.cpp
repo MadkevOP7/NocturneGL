@@ -329,10 +329,14 @@ int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], 
 			Vector3 v0 = vertexList[0];
 			Vector3 v1 = vertexList[1];
 			Vector3 v2 = vertexList[2];
-			float alpha = NTMath::f12(x, y, v1, v2) / NTMath::f12(v0.x, v0.y, v1, v2);
-			float beta = NTMath::f20(x, y, v2, v0) / NTMath::f20(v1.x, v1.y, v2, v0);
-			float gamma = NTMath::f01(x, y, v0, v1) / NTMath::f01(v2.x, v2.y, v0, v1);
 
+			float f12 = NTMath::f12(v0.x, v0.y, v1, v2);
+			float f20 = NTMath::f20(v1.x, v1.y, v2, v0);
+			float f01 = NTMath::f01(v2.x, v2.y, v0, v1);
+
+			float alpha = NTMath::f12(x, y, v1, v2) / f12;
+			float beta = NTMath::f20(x, y, v2, v0) / f20;
+			float gamma = NTMath::f01(x, y, v0, v1) / f01;
 			if ((alpha >= 0) && (beta >= 0) && (gamma >= 0)) {
 				//Z-Buffer to determine if current pixel should be put
 				//Interpolate z from alpha beta gamma
@@ -525,7 +529,7 @@ int NtInvertRotMat(const NtMatrix& mat, NtMatrix& result) {
 }
 
 /// <summary>
-/// Inverts the scale matrix, where the diagnol scale are the reciprocal of the original
+/// Inverts the scale matrix, where the diagonal scale are the reciprocal of the original
 /// </summary>
 /// <param name="mat"></param>
 /// <param name="result"></param>
@@ -782,7 +786,7 @@ int NtLoadMesh(const std::string meshName, const std::string meshExtension, NtSc
 int NtRenderScene(NtScene* scene, const std::string outputName, NT_SHADING_MODE shadingMode) {
 	int status = 0;
 	NtDisplay* displayPtr;
-	status |= NtNewDisplay(&displayPtr, scene->camera.xRes, scene->camera.yRes, Vector4(1, 1, 1, 1));
+	status |= NtNewDisplay(&displayPtr, scene->camera.xRes, scene->camera.yRes);
 	NtRender* renderPtr;
 	status |= NtNewRender(&renderPtr, displayPtr);
 	status |= NtSetRenderAttributes(renderPtr, scene);

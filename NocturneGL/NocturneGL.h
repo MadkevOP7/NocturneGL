@@ -19,7 +19,7 @@ typedef struct {
 #define NT_SUCCESS      0
 #define NT_FAILURE      1
 #define NT_PI 3.1415926
-
+#define EPSILON 1e-6
 enum NT_SHADING_MODE {
 	NT_SHADE_FLAT,
 	NT_SHADE_PHONG,
