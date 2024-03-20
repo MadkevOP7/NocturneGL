@@ -4,15 +4,90 @@
 #include <unordered_map>
 /*Pixel Data*/
 typedef struct {
-	short r, g, b, a;
+	unsigned short r, g, b, a;
 } NtPixel;
 
+typedef struct {
+	float r, g, b, a;
+} NtPixelf;
+
+/// <summary>
+/// Multiply a pixel by scalar
+/// </summary>
+/// <param name="pixel"></param>
+/// <param name="scalar"></param>
+/// <returns></returns>
+static NtPixelf NtPixelMultiply(const NtPixelf& pixel, const float scalar) {
+	NtPixelf result;
+	result.r = pixel.r * scalar;
+	result.g = pixel.g * scalar;
+	result.b = pixel.b * scalar;
+	result.a = pixel.a * scalar;
+	return result;
+}
+
+/// <summary>
+/// Returns a NtPixel result of a - b
+/// </summary>
+/// <param name="a"></param>
+/// <param name="b"></param>
+/// <returns></returns>
+static NtPixelf NtPixelSubtraction(const NtPixelf& a, const NtPixelf& b) {
+	NtPixelf result;
+	result.r = a.r - b.r;
+	result.g = a.g - b.g;
+	result.b = a.b - b.b;
+	result.a = a.a - b.a;
+	return result;
+}
+
+/// <summary>
+/// Returns a NtPixel result of a + b
+/// </summary>
+/// <param name="a"></param>
+/// <param name="b"></param>
+/// <returns></returns>
+static NtPixelf NtPixelAddition(const NtPixelf& a, const NtPixelf& b) {
+	NtPixelf result;
+	result.r = a.r + b.r;
+	result.g = a.g + b.g;
+	result.b = a.b + b.b;
+	result.a = a.a + b.a;
+	return result;
+}
+
+
+class NtTexture {
+private:
+	int width;
+	int height;
+	std::vector<std::vector<NtPixelf>> textureData;
+public:
+	int GetWidth() const { return width; }
+	int GetHeight() const { return height; }
+	NtTexture(const std::string& filename);
+
+	NtPixelf GetPixelf(int x, int y) const {
+		if (x >= 0 && x < width && y >= 0 && y < height) {
+			NtPixelf result;
+			result.r = textureData[y][x].r;
+			result.g = textureData[y][x].g;
+			result.b = textureData[y][x].b;
+			result.a = textureData[y][x].a;
+			return result;
+		}
+		std::cerr << "NtTexture: Invalid pixel lookup parameters! x: " << x << " y: " << y << " width: " << width << " height: " << height << "\n";
+		return { 0, 0, 0 ,0 };
+	}
+};
+NtPixelf NtTextureLookUp(float u, float v, const NtTexture& texture);
+
 /*Constants*/
-#define RED     0               /* array indicies for color vector */
+#define RED     0               /* array indices for color vector */
 #define GREEN   1
 #define BLUE    2
 
-#define X       0               /* array indicies for position vector */
+#define X       0               /* array indices for position vector */
 #define Y       1
 #define Z       2
 
@@ -305,7 +380,10 @@ typedef struct NtMaterial {
 	float Ka;
 	float Kd;
 	float Ks;
+	float Kt = 0.7f;
 	float specularExponent;
+	std::string textureId;
+	NtTexture* texture;
 } NtMaterial;
 typedef struct NtShape
 {
@@ -322,6 +400,7 @@ typedef struct  NtScene
 	std::vector<NtShape> shapes;
 	NtCamera camera;
 	std::unordered_map<std::string, NtMesh*> meshMap;
+	std::unordered_map<std::string, NtTexture*> textureMap;
 	std::vector<NtLight> lights;
 	NtLight directional;
 	NtLight ambient;
@@ -338,10 +417,10 @@ int NtFlushDisplayBufferJPEG(FILE* outfile, NtDisplay* display);
 int NtPutDisplay(NtDisplay* display, int i, int j, short r, short g, short b, short a);
 int ClipInt(int input, int min, int max);
 float Clipf(float input, int min, int max);
-
+void ClipVec3(Vector3& vec);
 int NtNewRender(NtRender** render, NtDisplay* display);
 int NtFreeRender(NtRender* render);
-int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], const NtMaterial& material);
+int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], Vector2 uvList[], const NtMaterial& material);
 int NtPutTriangle(NtRender* render, NtTriangle& triangle, const NtMaterial& material);
 
 //////Perspective, Matrix//////
@@ -365,7 +444,8 @@ int NtCalculateViewMatrix(NtCamera& cameram, Vector3 u, Vector3 v, Vector3 n, Ve
 int NtCalculateProjectionMatrix(NtCamera& camera, float near, float far, float top, float bottom, float left, float right);
 int NtPutCamera(NtRender* render, NtCamera& camera);
 
-int NtLoadSceneJSON(std::string scenePath, NtScene* scene);
+int NtLoadSceneJSON(std::string scenePath, NtScene* scene, bool autoLoadMeshAndTexture = true);
+int NtLoadTexture(NtMaterial& material, NtScene* scene);
 int NtLoadMesh(std::string meshName, const std::string meshExtension, NtScene* scene);
 int NtSetWorldMatrix(NtRender* render, NtMatrix& matrix, NtMatrix& matrixInverseTransposed);
 int NtSetRenderAttributes(NtRender* render, NtScene* scene);
@@ -374,4 +454,6 @@ int NtRenderScene(NtScene* scene, const std::string outputName, NT_SHADING_MODE 
 //Shading
 Vector3 NtLightingPhong(const NtMaterial& material, const Vector3& normal, const NtLight& lightSource, const Vector3& viewDirection, const NtLight& ambientLight);
 Vector3 NtAverageQuadNormals(const Vector3 normalList[]);
+float NtInterpolate(const Vector3& vec, float alpha, float beta, float gamma);
 Vector3 NtInterpolateVector3(const Vector3 vectors[], float alpha, float beta, float gamma, bool isNormal);
+void NtTexturePixel(Vector3& color, const NtMaterial& material, Vector2 vertsUV[], Vector3 triVerts[], float alpha, float beta, float gamma);

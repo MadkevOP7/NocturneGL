@@ -41,6 +41,9 @@
     <ClCompile Include="Application4.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Application5.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="rects" />

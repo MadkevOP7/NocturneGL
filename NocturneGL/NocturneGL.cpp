@@ -32,8 +32,108 @@ public:
 	}
 };
 
+//Texture//
+NtTexture::NtTexture(const std::string& filename) {
+	width = 0;
+	height = 0;
+	std::ifstream file(filename, std::ios::binary);
+	if (!file.is_open()) {
+		std::cerr << "NtTexture: Error opening file " << filename << "\n";
+		return;
+	}
+
+	std::string header;
+	file >> header;
+	if (header != "P6") {
+		std::cerr << "NtTexture: Unsupported file format " << header << "\n";
+		return;
+	}
+
+	file.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+
+	//Skip comments and whitespace
+	char ch;
+	while (file.peek() == '#' || std::isspace(file.peek())) {
+		if (file.peek() == '#') {
+			file.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+		}
+		else {
+			file.get(ch);
+		}
+	}
+
+	file >> width >> height;
+	if (width <= 0 || height <= 0) {
+		std::cerr << "Texture loading error, invalid size result!\n";
+		return;
+	}
+
+	int maxVal;
+	file >> maxVal;
+	file.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+
+	if (maxVal != 255) {
+		std::cerr << "Unsupported maxVal in PPM: " << maxVal << "\n";
+		return;
+	}
+
+	textureData.resize(height, std::vector<NtPixelf>(width));
+	unsigned char rgb[3];
+	for (int y = 0; y < height; ++y) {
+		for (int x = 0; x < width; ++x) {
+			if (!file.read(reinterpret_cast<char*>(rgb), 3)) {
+				std::cerr << "Error reading pixel data at (" << x << ", " << y << ").\n";
+				std::cerr << "Read error: " << (file.eof() ? "End of file reached unexpectedly." : "Unknown error.") << "\n";
+				return;
+			}
+
+			// Normalize the 8-bit values to the range [0, 1] for floating-point
+			textureData[y][x] = {
+				rgb[0] / 255.0f,
+				rgb[1] / 255.0f,
+				rgb[2] / 255.0f,
+				1.0f  // Assuming full opacity for alpha
+			};
+		}
+	}
+
+
+	if (width == 0 || height == 0) {
+		std::cerr << "Texture loading error, invalid size result!\n";
+	}
+	else {
+		std::cout << "Texture read: " << filename << " width: " << width << " height: " << height << "\n";
+	}
+}
+
+NtPixelf NtTextureLookUp(float u, float v, const NtTexture& texture) {
+	float xLocation = u * (texture.GetWidth() - 1);
+	float yLocation = v * (texture.GetHeight() - 1);
+	int x0 = static_cast<int>(xLocation);
+	int y0 = static_cast<int>(yLocation);
+	int x1 = x0 + 1;
+	int y1 = y0 + 1;
+
+	float xFrac = xLocation - x0;
+	float yFrac = yLocation - y0;
+
+	NtPixelf p00 = texture.GetPixelf(x0, y0);
+	NtPixelf p10 = texture.GetPixelf(x1, y0);
+	NtPixelf p01 = texture.GetPixelf(x0, y1);
+	NtPixelf p11 = texture.GetPixelf(x1, y1);
+
+	// Directly interpolate along x for both y0 and y1 lines
+	NtPixelf p0010 = NtPixelAddition(NtPixelMultiply(p00, 1 - xFrac), NtPixelMultiply(p10, xFrac));
+	NtPixelf p0111 = NtPixelAddition(NtPixelMultiply(p01, 1 - xFrac), NtPixelMultiply(p11, xFrac));
+
+	// Final interpolation along y
+	NtPixelf output = NtPixelAddition(NtPixelMultiply(p0010, 1 - yFrac), NtPixelMultiply(p0111, yFrac));
+
+	return output;
+}
+
 /// <summary>
-/// Sets the render's shading mode, return NT_FAILURE if render pointer is null
+/// Sets the renderer's shading mode, return NT_FAILURE if render pointer is null
 /// </summary>
 /// <param name="render"></param>
 /// <param name="mode"></param>
@@ -169,6 +269,12 @@ float Clipf(float input, int min, int max) {
 	if (input > max) return max;
 	return input;
 }
+
+void ClipVec3(Vector3& vec) {
+	vec.x = Clipf(vec.x, 0, 1);
+	vec.y = Clipf(vec.y, 0, 1);
+	vec.z = Clipf(vec.z, 0, 1);
+}
 /// <summary>
 /// Flushes display buffer to a ppm file
 /// </summary>
@@ -256,7 +362,7 @@ int NtFreeRender(NtRender* render) {
 /// <param name="normalList"></param>
 /// <param name="color"></param>
 /// <returns></returns>
-int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], const NtMaterial& material) {
+int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], Vector2 uvList[], const NtMaterial& material) {
 	if (render == nullptr) return NT_FAILURE;
 
 	//Transform vertex and normals
@@ -353,6 +459,8 @@ int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], 
 					else if (render->shadingMode == NT_SHADE_GOURAUD) {
 						finalColor = NtInterpolateVector3(vertexColors, alpha, beta, gamma, false);
 					}
+
+					NtTexturePixel(finalColor, material, uvList, vertexList, alpha, beta, gamma);
 					NtPutDisplay(render->display, x, y, NTMath::fts(finalColor.x), NTMath::fts(finalColor.y), NTMath::fts(finalColor.z), 255);
 				}
 			}
@@ -372,7 +480,12 @@ int NtPutTriangle(NtRender* render, NtTriangle& triangle, const NtMaterial& mate
 	normalList[1] = triangle.v1.vertexNormal;
 	normalList[2] = triangle.v2.vertexNormal;
 
-	return NtPutTriangle(render, vertexList, normalList, material);
+	Vector2 uvList[3];
+	uvList[0] = triangle.v0.texture;
+	uvList[1] = triangle.v1.texture;
+	uvList[2] = triangle.v2.texture;
+
+	return NtPutTriangle(render, vertexList, normalList, uvList, material);
 }
 //////Transormations//////
 
@@ -616,12 +729,12 @@ int NtCalculateProjectionMatrix(NtCamera& camera, float near, float far, float t
 ///////Scene///////
 
 /// <summary>
-/// Loads a scene description in JSON format to current scene
+/// Loads a scene description in JSON format to current scene. If autoLoadMeshAndTexture = false, user must manually specify to load mesh and textures.
 /// </summary>
 /// <param name="scenePath"></param>
-int NtLoadSceneJSON(std::string scenePath, NtScene* scene) {
+int NtLoadSceneJSON(std::string scenePath, NtScene* scene, bool autoLoadMeshAndTexture) {
 	using json = nlohmann::json;
-
+	int status = 0;
 	std::ifstream file(scenePath); // Assuming the JSON is stored in a file named "scene.json"
 
 	if (!file.is_open()) {
@@ -656,7 +769,15 @@ int NtLoadSceneJSON(std::string scenePath, NtScene* scene) {
 				shape.material.Ka = material["Ka"];
 				shape.material.Kd = material["Kd"];
 				shape.material.Ks = material["Ks"];
+				shape.material.Kt = material["Kt"];
 				shape.material.specularExponent = material["n"];
+				shape.material.textureId = material["texture"];
+
+				//Auto load into mesh map
+				if (autoLoadMeshAndTexture) {
+					status |= NtLoadMesh(shape.geometryId, ".json", scene);
+					status |= NtLoadTexture(shape.material, scene);
+				}
 
 				//Write transformations
 				const auto& transforms = shapeValue["transforms"];
@@ -730,7 +851,7 @@ int NtLoadSceneJSON(std::string scenePath, NtScene* scene) {
 			}
 		}
 		std::cout << "Scene parsing completed!\n";
-		return NT_SUCCESS;
+		return status;
 	}
 	catch (const std::exception& e) {
 		std::cout << "Error parsing JSON " << e.what() << "\n";
@@ -738,7 +859,38 @@ int NtLoadSceneJSON(std::string scenePath, NtScene* scene) {
 	}
 }
 
+/// <summary>
+/// Loads a texture into given scene's texture map
+/// </summary>
+/// <param name="textureName"></param>
+/// <param name="scene"></param>
+/// <returns></returns>
+int NtLoadTexture(NtMaterial& material, NtScene* scene) {
+	std::string textureName = material.textureId;
+	auto it = scene->textureMap.find(textureName);
+	if (it != scene->textureMap.end()) {
+		std::cout << "Texture map already contains " << textureName << ". Skipped loading" << std::endl;
+		return NT_SUCCESS;
+	}
+
+	NtTexture* texture = new NtTexture(textureName);
+	if (texture->GetHeight() == 0 || texture->GetWidth() == 0) {
+		std::cerr << "Failed to load texture: " << textureName << "\n";
+		return NT_FAILURE;
+	}
+
+	scene->textureMap[textureName] = texture;
+	material.texture = texture;
+	return NT_SUCCESS;
+}
+
 int NtLoadMesh(const std::string meshName, const std::string meshExtension, NtScene* scene) {
+	auto it = scene->meshMap.find(meshName);
+	if (it != scene->meshMap.end()) {
+		std::cout << "Mesh map already contains " << meshName << ". Skipped loading" << std::endl;
+		return NT_SUCCESS;
+	}
+
 	std::ifstream file(meshName + meshExtension);
 	if (!file.is_open()) {
 		std::cout << "File with name " << meshName << meshExtension << " could not be found";
@@ -895,6 +1047,10 @@ Vector3 NtInterpolateVector3(const Vector3 vectors[], float alpha, float beta, f
 	return result;
 }
 
+float NtInterpolate(const Vector3& vec, float alpha, float beta, float gamma) {
+	return alpha * vec.x + beta * vec.y + gamma * vec.z;
+}
+
 Vector3 NtLightingPhong(const NtMaterial& material, const Vector3& normal, const NtLight& lightSource, const Vector3& viewDirection, const NtLight& ambientLight) {
 	//Lighting = ambient + diffuse + specular
 	Vector3 lighting;
@@ -930,4 +1086,30 @@ Vector3 NtLightingPhong(const NtMaterial& material, const Vector3& normal, const
 	color.z = Clipf(color.z, 0, 1);
 
 	return color;
+}
+
+void NtTexturePixel(Vector3& color, const NtMaterial& material, Vector2 vertsUV[], Vector3 triVerts[], float alpha, float beta, float gamma) {
+	//Divide U, V by z
+	Vector3 vertsU = { vertsUV[0].x / triVerts[0].z, vertsUV[1].x / triVerts[1].z, vertsUV[2].x / triVerts[2].z };
+	Vector3 vertsV = { vertsUV[0].y / triVerts[0].z, vertsUV[1].y / triVerts[1].z, vertsUV[2].y / triVerts[2].z };
+
+	float s = NtInterpolate(vertsU, alpha, beta, gamma);
+	float t = NtInterpolate(vertsV, alpha, beta, gamma);
+
+	if (nullptr == material.texture) {
+		std::cerr << "Error Getting Texture, Material has null texture ptr!\n";
+		return;
+	}
+
+	Vector3 vertsZ = { 1 / triVerts[0].z, 1 / triVerts[1].z ,1 / triVerts[2].z };
+	float z = 1 / NtInterpolate(vertsZ, alpha, beta, gamma);
+
+	s *= z;
+	t *= z;
+
+	//Blend pixel texture map color with the original color, here alpha from pixel is disposed
+	//To make sure the final color is still in [0, 1] we clip all components of it
+	NtPixelf textureResult = NtTextureLookUp(s, t, *material.texture);
+	color = color + (Vector3(textureResult.r, textureResult.g, textureResult.b) * material.Kt);
+	ClipVec3(color);
 }
