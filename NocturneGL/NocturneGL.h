@@ -80,7 +80,7 @@ public:
 		return { 0, 0, 0 ,0 };
 	}
 };
-NtPixelf NtTextureLookUp(float u, float v, const NtTexture& texture);
+NtPixelf NtTextureLookUp(float u, float v, const NtTexture& texture, bool horizontalFlip = true);
 
 /*Constants*/
 #define RED     0               /* array indices for color vector */

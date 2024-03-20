@@ -16,7 +16,7 @@
           "Ks": 0.9,
           "Kt": 0.7,
           "n": 2.0,
-          "texture" : "sakura-texture"
+          "texture" : "usc-texture"
         },
         "transforms":[
           {

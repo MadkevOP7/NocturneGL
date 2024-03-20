@@ -106,13 +106,24 @@ NtTexture::NtTexture(const std::string& filename) {
 	}
 }
 
-NtPixelf NtTextureLookUp(float u, float v, const NtTexture& texture) {
+NtPixelf NtTextureLookUp(float u, float v, const NtTexture& texture, bool horizontalFlip) {
 	float xLocation = u * (texture.GetWidth() - 1);
 	float yLocation = v * (texture.GetHeight() - 1);
+	if (horizontalFlip) {
+		xLocation = (1 - u) * (texture.GetWidth() - 1);
+	}
 	int x0 = static_cast<int>(xLocation);
 	int y0 = static_cast<int>(yLocation);
 	int x1 = x0 + 1;
 	int y1 = y0 + 1;
+
+	//Wrap image
+	if (x1 >= texture.GetWidth()) {
+		x1 = x1 % texture.GetWidth();
+	}
+	if (y1 >= texture.GetHeight()) {
+		y1 = y1 % texture.GetHeight();
+	}
 
 	float xFrac = xLocation - x0;
 	float yFrac = yLocation - y0;
