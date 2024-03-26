@@ -289,12 +289,19 @@ struct NtLight {
 	Vector3 direction;
 };
 
+typedef struct {
+	float shiftX, shiftY, weight;
+} NtAAShift;
+
 /*Rendering*/
 typedef struct {
 	unsigned short	xRes;
 	unsigned short	yRes;
 	short			open;
 	NtPixel* frameBuffer;		/* frame buffer array */
+	int sampleCount;
+	std::vector<NtPixel*> sampleBuffer; /*anti aliasing, sample final with weighted average*/
+	NtAAShift aaShifts[6];
 } NtDisplay;
 
 typedef struct NtVertex {
@@ -337,6 +344,7 @@ typedef struct {
 	std::vector<NtLight> lights;
 	NtLight directionalLight;
 	NtLight ambientLight;
+	int sampleRenderNum; //-1 = main render, >= 0 -> this render a sample render
 }  NtRender;
 
 
@@ -409,16 +417,18 @@ typedef struct  NtScene
 /*Core Functions*/
 int NtSetShadingMode(NtRender* render, NT_SHADING_MODE mode);
 int NtNewFrameBuffer(NtPixel** frameBuffer, int width, int height);
-int NtNewDisplay(NtDisplay** display, int xRes, int yRes, Vector4 backgroundColor = { 0, 0, 0, 255 });
+int NtNewDisplay(NtDisplay** display, int xRes, int yRes, Vector4 backgroundColor = { 0, 0, 0, 255 }, int aaSampleCount = 6);
+int NtLoadAAFilter(NtDisplay* display);
 int NtFreeDisplay(NtDisplay* display);
-int NtInitDisplay(NtDisplay* display, const Vector4& backgroundColor); //Default black
+int NtInitDisplay(NtDisplay* display, const Vector4& backgroundColor, int aaSampleCount); //Default black
 int NtFlushDisplayBufferPPM(FILE* outfile, NtDisplay* display);
 int NtFlushDisplayBufferJPEG(FILE* outfile, NtDisplay* display);
-int NtPutDisplay(NtDisplay* display, int i, int j, short r, short g, short b, short a);
+int NtPutDisplay(NtDisplay* display, int i, int j, short r, short g, short b, short a, int aaFilterIndex = -1);
+int NtAverageSampleToFrameBuffer(NtDisplay* display);
 int ClipInt(int input, int min, int max);
 float Clipf(float input, int min, int max);
 void ClipVec3(Vector3& vec);
-int NtNewRender(NtRender** render, NtDisplay* display);
+int NtNewRender(NtRender** render, NtDisplay* display, int sampleRenderNum = -1);
 int NtFreeRender(NtRender* render);
 int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], Vector2 uvList[], const NtMaterial& material);
 int NtPutTriangle(NtRender* render, NtTriangle& triangle, const NtMaterial& material);

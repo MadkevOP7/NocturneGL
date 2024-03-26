@@ -6,7 +6,7 @@
 /// Creates a render given input rect file
 /// </summary>
 /// <returns></returns>
-int Render_5(int width, int height, const std::string output)
+int Render_6(int width, int height, const std::string output)
 {
 	auto start = std::chrono::high_resolution_clock::now();
 	int status = 0;
@@ -31,9 +31,9 @@ int Render_5(int width, int height, const std::string output)
 
 }
 
-int main_5()
+int main()
 {
-	int status = Render_5(512, 512, "output5.ppm");
+	int status = Render_6(512, 512, "output6.ppm");
 	std::cout << "\nRender Status: " << (status == NT_SUCCESS ? "Success" : "Failed");
 	return 0;
 }

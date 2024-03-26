@@ -168,10 +168,9 @@ int NtNewFrameBuffer(NtPixel** frameBuffer, int width, int height)
 {
 
 	if (width <= 0 || height <= 0) return NT_FAILURE;
-	size_t pixelSize = sizeof(NtPixel);
 
 	// Allocate memory for the framebuffer as a row-major 2D array
-	*frameBuffer = new NtPixel[width * height * pixelSize];
+	*frameBuffer = new NtPixel[width * height];
 	return NT_SUCCESS;
 }
 
@@ -184,7 +183,7 @@ int NtNewFrameBuffer(NtPixel** frameBuffer, int width, int height)
 /// <param name="xRes"></param>
 /// <param name="yRes"></param>
 /// <returns></returns>
-int NtNewDisplay(NtDisplay** display, int xRes, int yRes, Vector4 backgroundColor)
+int NtNewDisplay(NtDisplay** display, int xRes, int yRes, Vector4 backgroundColor, int aaSampleCount)
 {
 	*display = new NtDisplay();
 	(*display)->xRes = xRes;
@@ -192,8 +191,8 @@ int NtNewDisplay(NtDisplay** display, int xRes, int yRes, Vector4 backgroundColo
 	int status = 0;
 
 	status |= NtNewFrameBuffer(&((*display)->frameBuffer), xRes, yRes);
-	status |= NtInitDisplay(*display, backgroundColor);
-
+	status |= NtInitDisplay(*display, backgroundColor, aaSampleCount);
+	status |= NtLoadAAFilter(*display);
 	return status ? NT_FAILURE : NT_SUCCESS;
 }
 
@@ -214,12 +213,12 @@ int NtFreeDisplay(NtDisplay* display)
 /// </summary>
 /// <param name="display"></param>
 /// <returns></returns>
-int NtInitDisplay(NtDisplay* display, const Vector4& backgroundColor)
+int NtInitDisplay(NtDisplay* display, const Vector4& backgroundColor, int aaSampleCount)
 {
 	if (display == nullptr || display->frameBuffer == nullptr) return NT_FAILURE;
-
+	display->sampleCount = aaSampleCount;
 	//Todo: we could cache buffer size
-	int bufferSize = display->xRes * display->yRes * sizeof(NtPixel);
+	int bufferSize = display->xRes * display->yRes;
 	for (int i = 0; i < bufferSize; i++) {
 		display->frameBuffer[i].r = NTMath::fts(backgroundColor.x);
 		display->frameBuffer[i].g = NTMath::fts(backgroundColor.y);
@@ -227,6 +226,23 @@ int NtInitDisplay(NtDisplay* display, const Vector4& backgroundColor)
 		display->frameBuffer[i].a = NTMath::fts(backgroundColor.w);
 	}
 
+	//Init sample buffer
+	display->sampleBuffer.resize(aaSampleCount);
+	for (int i = 0; i < aaSampleCount; i++) {
+		NtPixel* buffer;
+		NtNewFrameBuffer(&buffer, display->xRes, display->yRes);
+		display->sampleBuffer[i] = buffer;
+	}
+
+	//Init sample buffer
+	for (int i = 0; i < aaSampleCount; i++) {
+		for (int j = 0; j < bufferSize; j++) {
+			display->sampleBuffer[i][j].r = NTMath::fts(backgroundColor.x);
+			display->sampleBuffer[i][j].g = NTMath::fts(backgroundColor.y);
+			display->sampleBuffer[i][j].b = NTMath::fts(backgroundColor.z);
+			display->sampleBuffer[i][j].a = NTMath::fts(backgroundColor.w);
+		}
+	}
 	return NT_SUCCESS;
 }
 
@@ -242,17 +258,67 @@ int NtInitDisplay(NtDisplay* display, const Vector4& backgroundColor)
 /// <param name="a"></param>
 /// <param name="z"></param>
 /// <returns></returns>
-int NtPutDisplay(NtDisplay* display, int i, int j, short r, short g, short b, short a)
+int NtPutDisplay(NtDisplay* display, int i, int j, short r, short g, short b, short a, int aaFilterIndex)
 {
 	if (display == nullptr || display->frameBuffer == nullptr) return NT_FAILURE;
+	if (aaFilterIndex >= 0) {
+		NtAAShift aaShift = display->aaShifts[aaFilterIndex];
+		i += aaShift.shiftX;
+		j += aaShift.shiftY;
+	}
 	int index = ClipInt(i, 0, display->xRes) + ClipInt(j, 0, display->yRes) * display->xRes;
-	display->frameBuffer[index].r = r;
-	display->frameBuffer[index].g = g;
-	display->frameBuffer[index].b = b;
-	display->frameBuffer[index].a = a;
+
+	//No anti-aliasing, directly write the frame buffer
+	if (aaFilterIndex == -1) {
+		display->frameBuffer[index].r = r;
+		display->frameBuffer[index].g = g;
+		display->frameBuffer[index].b = b;
+		display->frameBuffer[index].a = a;
+	}
+	else {
+		if (aaFilterIndex < 0 || aaFilterIndex >= display->sampleCount)
+			return NT_FAILURE;
+		display->sampleBuffer[aaFilterIndex][index].r = r;
+		display->sampleBuffer[aaFilterIndex][index].g = g;
+		display->sampleBuffer[aaFilterIndex][index].b = b;
+		display->sampleBuffer[aaFilterIndex][index].a = a;
+	}
+
 	return NT_SUCCESS;
 }
 
+/// <summary>
+/// Takes the average of current sample buffers and write the averaged pixel to frame buffer
+/// </summary>
+/// <param name="display"></param>
+/// <returns></returns>
+int NtAverageSampleToFrameBuffer(NtDisplay* display) {
+	if (display == nullptr) return NT_FAILURE;
+	if (display->sampleCount <= 0) return NT_SUCCESS;
+
+	int bufferSize = display->xRes * display->yRes;
+	for (int i = 0; i < bufferSize; i++) {
+		short rSum = 0, gSum = 0, bSum = 0, aSum = 0;
+		float weightSum = 0.0f;
+
+		for (int j = 0; j < display->sampleCount; j++) {
+			float weight = display->aaShifts[j].weight;
+			weightSum += weight;
+
+			rSum += display->sampleBuffer[j][i].r * weight;
+			gSum += display->sampleBuffer[j][i].g * weight;
+			bSum += display->sampleBuffer[j][i].b * weight;
+			aSum += display->sampleBuffer[j][i].a * weight;
+		}
+
+		display->frameBuffer[i].r = static_cast<unsigned short>(rSum / weightSum);
+		display->frameBuffer[i].g = static_cast<unsigned short>(gSum / weightSum);
+		display->frameBuffer[i].b = static_cast<unsigned short>(bSum / weightSum);
+		display->frameBuffer[i].a = static_cast<unsigned short>(aSum / weightSum);
+	}
+
+	return NT_SUCCESS;
+}
 
 /// <summary>
 /// Placeholder clip function as negative rect position isn't supported yet
@@ -328,11 +394,12 @@ void write_func(void* context, void* data, int size) {
 /// <param name="render"></param>
 /// <param name="display"></param>
 /// <returns></returns>
-int NtNewRender(NtRender** render, NtDisplay* display) {
+int NtNewRender(NtRender** render, NtDisplay* display, int sampleRenderNum) {
 	if (display == nullptr) return NT_FAILURE;
 	*render = new NtRender();
 	(*render)->display = display;
 	(*render)->zBuffer = new float* [display->xRes + 1];
+	(*render)->sampleRenderNum = sampleRenderNum;
 	if (!(*render)->zBuffer) {
 		delete render;
 		return NT_FAILURE;
@@ -472,7 +539,7 @@ int NtPutTriangle(NtRender* render, Vector3 vertexList[], Vector3 normalList[], 
 					}
 
 					NtTexturePixel(finalColor, material, uvList, vertexList, alpha, beta, gamma);
-					NtPutDisplay(render->display, x, y, NTMath::fts(finalColor.x), NTMath::fts(finalColor.y), NTMath::fts(finalColor.z), 255);
+					NtPutDisplay(render->display, x, y, NTMath::fts(finalColor.x), NTMath::fts(finalColor.y), NTMath::fts(finalColor.z), 255, render->sampleRenderNum);
 				}
 			}
 		}
@@ -941,6 +1008,23 @@ int NtLoadMesh(const std::string meshName, const std::string meshExtension, NtSc
 }
 
 /// <summary>
+/// Loads anti-aliasing filter into display, max sample count is 6
+/// </summary>
+/// <param name="display"></param>
+/// <returns></returns>
+int NtLoadAAFilter(NtDisplay* display) {
+	if (display == nullptr) return NT_FAILURE;
+	display->aaShifts[0] = { -0.52, 0.38, 0.128 };
+	display->aaShifts[1] = { 0.41, 0.56, 0.119 };
+	display->aaShifts[2] = { 0.27,  0.08, 0.294 };
+	display->aaShifts[3] = { -0.17, -0.29, 0.249 };
+	display->aaShifts[4] = { 0.58, -0.55, 0.104 };
+	display->aaShifts[5] = { -0.31, -0.71, 0.106 };
+
+	return NT_SUCCESS;
+}
+
+/// <summary>
 /// Renders a scene, handles the other stuff automatically
 /// </summary>
 /// <param name="scene"></param>
@@ -954,11 +1038,21 @@ int NtRenderScene(NtScene* scene, const std::string outputName, NT_SHADING_MODE 
 	status |= NtNewRender(&renderPtr, displayPtr);
 	status |= NtSetRenderAttributes(renderPtr, scene);
 	status |= NtSetShadingMode(renderPtr, shadingMode);
-	if (status) return NT_FAILURE;
-
-
 	//Put camera and matrix
 	status |= NtPutCamera(renderPtr, scene->camera);
+	if (status) return NT_FAILURE;
+
+	std::vector<NtRender*> sampleRenders;
+	sampleRenders.resize(displayPtr->sampleCount);
+	//Init sample renders
+	for (int i = 0; i < displayPtr->sampleCount; i++) {
+		NtRender* render;
+		status |= NtNewRender(&render, displayPtr, i);
+		status |= NtSetRenderAttributes(render, scene);
+		status |= NtSetShadingMode(render, shadingMode);
+		status |= NtPutCamera(render, scene->camera);
+		sampleRenders[i] = render;
+	}
 
 	//Calculate camerae matrix, we need to calculate u, v, n, r
 	Vector3 n = (scene->camera.from - scene->camera.to);
@@ -1009,12 +1103,25 @@ int NtRenderScene(NtScene* scene, const std::string outputName, NT_SHADING_MODE 
 		NtMatrix combinedTransformationInversed = scaleInversed * combinedRotationInversed * translationInversed;
 		combinedRotationInversed.transpose();
 		NtSetWorldMatrix(renderPtr, combinedTransformation, combinedTransformationInversed);
+		for (int i = 0; i < sampleRenders.size(); i++) {
+			NtSetWorldMatrix(sampleRenders[i], combinedTransformation, combinedTransformationInversed);
+		}
 		//Render faces of that model
 		NtMesh* mesh = scene->meshMap[shape.geometryId];
 		for (NtTriangle& triangle : mesh->triangles) {
-			NtPutTriangle(renderPtr, triangle, shape.material);
+			if (displayPtr->sampleCount <= 0) {
+				//No anti-aliasing, render to frame buffer directly
+				NtPutTriangle(renderPtr, triangle, shape.material);
+			}
+			else {
+				for (int i = 0; i < sampleRenders.size(); i++) {
+					NtPutTriangle(sampleRenders[i], triangle, shape.material);
+				}
+			}
 		}
 	}
+
+	status |= NtAverageSampleToFrameBuffer(displayPtr);
 
 	//Flush to ppm
 	FILE* outfile = NULL;

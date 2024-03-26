@@ -133,6 +133,7 @@
     <ClCompile Include="Application3.cpp" />
     <ClCompile Include="Application4.cpp" />
     <ClCompile Include="Application5.cpp" />
+    <ClCompile Include="Application6.cpp" />
     <ClCompile Include="NocturneGL.cpp" />
     <ClCompile Include="Application2.cpp" />
   </ItemGroup>
