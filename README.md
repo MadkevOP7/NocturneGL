@@ -9,7 +9,7 @@ NocturneGL is a lightweight, single-buffered graphics library written in pure C+
 - Flat shading
 - JSON scene description
 - Texture mapping
-  
+- Anti-aliasing  
 Written by Kevin Yang
 
 ![NocturneGL](https://github.com/MadkevOP7/NocturneGL/assets/68880349/2c351dd3-a55f-4aed-bafc-ea630ef637e0)
